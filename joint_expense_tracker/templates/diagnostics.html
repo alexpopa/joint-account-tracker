@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head"><div><h1>Diagnostics</h1><p>Recent sender counts only; full message text is not printed.</p></div></section>
+<pre class="diagnostics">{% for line in lines %}{{ line }}
+{% endfor %}</pre>
+{% endblock %}

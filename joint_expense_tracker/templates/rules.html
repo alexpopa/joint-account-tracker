@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head"><div><h1>Rules</h1><p>Rules run on new imports in priority order.</p></div></section>
+<form class="inline-create wide" method="post">
+  <input name="match_text" placeholder="Sample Grocery" required>
+  <select name="match_field"><option value="merchant_or_raw">Merchant or raw</option><option value="merchant">Merchant</option><option value="raw">Raw text</option></select>
+  <select name="default_status">{% for status in statuses %}<option value="{{ status }}">{{ status }}</option>{% endfor %}</select>
+  <input name="default_joint_percent" type="number" step="0.01" min="0" max="1" placeholder="Split percent">
+  <input name="default_joint_amount" type="number" step="0.01" min="0" placeholder="Split amount">
+  <input name="priority" type="number" value="100">
+  <select name="active"><option value="1">Active</option><option value="0">Inactive</option></select>
+  <button>Add Rule</button>
+</form>
+<table><thead><tr><th>Match</th><th>Field</th><th>Status</th><th>Split</th><th>Priority</th><th>Active</th><th></th></tr></thead><tbody>
+{% for rule in rules %}
+<tr><td>{{ rule.match_text }}</td><td>{{ rule.match_field }}</td><td>{{ rule.default_status }}</td><td>{{ rule.default_joint_percent or rule.default_joint_amount or "" }}</td><td>{{ rule.priority }}</td><td>{{ "Yes" if rule.active else "No" }}</td><td><form method="post" action="/rules/{{ rule.id }}/delete"><button>Delete</button></form></td></tr>
+{% else %}<tr><td colspan="7">No rules configured.</td></tr>{% endfor %}
+</tbody></table>
+{% endblock %}

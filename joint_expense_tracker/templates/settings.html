@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head"><div><h1>Settings</h1><p>Data directory: {{ data_dir }}</p></div><a href="/diagnostics">Run Diagnostics</a></section>
+<form class="edit-form" method="post">
+  <label>Messages DB path <input name="messages_db_path" value="{{ settings.messages_db_path or '~/Library/Messages/chat.db' }}"></label>
+  <label>Chase sender filters <input name="chase_sender_filters" value="{{ settings.chase_sender_filters or default_senders }}"></label>
+  <label>Keyword filters <input name="chase_keyword_filters" value="{{ settings.chase_keyword_filters or default_keywords }}"></label>
+  <label>Polling interval <input name="polling_interval" value="{{ settings.polling_interval or 'manual' }}"></label>
+  <p class="notice">If access fails, enable Full Disk Access for Terminal, Python, or your IDE in System Settings -> Privacy & Security -> Full Disk Access.</p>
+  <button>Save Settings</button>
+</form>
+{% endblock %}

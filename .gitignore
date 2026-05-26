@@ -1,0 +1,29 @@
+.venv/
+.pytest_cache/
+__pycache__/
+*.pyc
+.DS_Store
+joint-expense-tracker-dashboard.png
+
+# Local app data and imported financial/message exports
+.joint-expense-tracker/
+messages_snapshot/
+exports/
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+*.csv
+*.tsv
+*.xlsx
+*.xls
+*.ofx
+*.qfx
+*.pdf
+
+# Local secrets/config
+.env
+.env.*
+*.pem
+*.key

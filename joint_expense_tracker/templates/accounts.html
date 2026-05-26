@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head"><div><h1>Accounts</h1><p>Map card endings to friendly names.</p></div></section>
+<form class="inline-create" method="post">
+  <input name="card_last4" maxlength="4" placeholder="1234" required>
+  <input name="account_name" placeholder="Chase Sapphire Preferred" required>
+  <select name="active"><option value="1">Active</option><option value="0">Inactive</option></select>
+  <button>Save Account</button>
+</form>
+<table><thead><tr><th>Last4</th><th>Name</th><th>Active</th></tr></thead><tbody>
+{% for acct in accounts %}<tr><td>{{ acct.card_last4 }}</td><td>{{ acct.account_name }}</td><td>{{ "Yes" if acct.active else "No" }}</td></tr>{% else %}<tr><td colspan="3">No accounts mapped yet.</td></tr>{% endfor %}
+</tbody></table>
+{% endblock %}

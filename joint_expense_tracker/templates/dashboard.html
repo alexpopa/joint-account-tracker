@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>Dashboard</h1>
+    <p>Selected month: {{ selected_month }}</p>
+  </div>
+  <form class="actions" method="get" action="/">
+    <select name="month">
+      {% for month in months %}
+      <option value="{{ month }}" {% if month == selected_month %}selected{% endif %}>{{ month }}</option>
+      {% endfor %}
+      {% if not months %}<option value="{{ selected_month }}">{{ selected_month }}</option>{% endif %}
+    </select>
+    <button>View</button>
+  </form>
+</section>
+
+<section class="metrics">
+  <div class="metric">
+    <span>Total joint reimbursement</span>
+    <strong>${{ "%.2f"|format(total_joint) }}</strong>
+  </div>
+  <div class="metric">
+    <span>Needs review</span>
+    <strong>{{ needs_review_count }}</strong>
+  </div>
+  <form method="post" action="/import" class="metric action-metric">
+    <button>Import New Messages</button>
+  </form>
+  <a class="metric action-metric" href="/export?month={{ selected_month }}">Export CSV</a>
+</section>
+
+<section class="grid-two">
+  <div>
+    <h2>By Card/Account</h2>
+    <table>
+      <thead><tr><th>Account</th><th class="money">Joint Total</th></tr></thead>
+      <tbody>
+        {% for row in totals_by_account %}
+        <tr><td>{{ row.label }}</td><td class="money">${{ "%.2f"|format(row.total or 0) }}</td></tr>
+        {% else %}
+        <tr><td colspan="2">No transactions yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div>
+    <h2>By Status</h2>
+    <table>
+      <thead><tr><th>Status</th><th>Count</th><th class="money">Joint</th></tr></thead>
+      <tbody>
+        {% for row in totals_by_status %}
+        <tr><td>{{ row.status }}</td><td>{{ row.count }}</td><td class="money">${{ "%.2f"|format(row.joint_total or 0) }}</td></tr>
+        {% else %}
+        <tr><td colspan="3">No status totals yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h2>Needs Review</h2>
+  <table>
+    <thead><tr><th>Date</th><th>Merchant</th><th class="money">Amount</th><th>Card</th><th>Actions</th></tr></thead>
+    <tbody>
+      {% for tx in needs_review %}
+      <tr>
+        <td>{{ tx.transaction_datetime[:10] }}</td>
+        <td>{{ tx.merchant }}</td>
+        <td class="money">${{ "%.2f"|format(tx.amount) }}</td>
+        <td>{{ tx.account_name or tx.card_last4 or "Unknown" }}</td>
+        <td class="row-actions">
+          <form method="post" action="/transactions/{{ tx.id }}/classify" class="tip-form">
+            <input type="hidden" name="status" value="Joint">
+            <input type="hidden" name="return_to" value="/">
+            <input name="tip_percent" type="number" min="0" max="100" step="0.1" placeholder="Tip %">
+            <button>Joint</button>
+          </form>
+          {% for status in ["Personal", "Review", "Ignored"] %}
+          <form method="post" action="/transactions/{{ tx.id }}/classify">
+            <input type="hidden" name="status" value="{{ status }}">
+            <input type="hidden" name="return_to" value="/">
+            <button>{{ status }}</button>
+          </form>
+          {% endfor %}
+          <a href="/transactions/{{ tx.id }}/edit">Edit</a>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5">Nothing waiting for review.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}
