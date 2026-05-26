@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -27,6 +27,19 @@ def startup() -> None:
 
 def redirect(path: str) -> RedirectResponse:
     return RedirectResponse(path, status_code=303)
+
+
+def optional_float(value: str | float | None, field_name: str) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return None
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=f"{field_name} must be a valid number") from exc
 
 
 @app.get("/")
@@ -104,11 +117,16 @@ def transactions(
 def classify(
     transaction_id: int,
     status: str = Form(...),
-    joint_amount: Optional[float] = Form(None),
-    tip_percent: Optional[float] = Form(None),
+    joint_amount: Optional[str] = Form(None),
+    tip_percent: Optional[str] = Form(None),
     return_to: str = Form("/transactions"),
 ):
-    classify_transaction(transaction_id, status, joint_amount, tip_percent)
+    classify_transaction(
+        transaction_id,
+        status,
+        optional_float(joint_amount, "joint_amount"),
+        optional_float(tip_percent, "tip_percent"),
+    )
     return redirect(return_to)
 
 

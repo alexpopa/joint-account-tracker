@@ -10,6 +10,33 @@ from joint_expense_tracker.db import init_db
 from joint_expense_tracker.models import ParsedAlert
 from joint_expense_tracker.rules import apply_rules, joint_amount_for_status, tip_amount_from_percent, tip_percent_from_amount
 from joint_expense_tracker.services import dashboard_data, export_month, insert_alert, update_transaction
+from joint_expense_tracker.web import classify
+
+
+def test_quick_joint_allows_blank_tip_percent(monkeypatch) -> None:
+    captured = {}
+
+    def fake_classify_transaction(transaction_id, status, joint_amount=None, tip_percent=None) -> None:
+        captured.update(
+            {
+                "transaction_id": transaction_id,
+                "status": status,
+                "joint_amount": joint_amount,
+                "tip_percent": tip_percent,
+            }
+        )
+
+    monkeypatch.setattr("joint_expense_tracker.web.classify_transaction", fake_classify_transaction)
+
+    response = classify(123, status="Joint", joint_amount=None, tip_percent="", return_to="/transactions")
+
+    assert response.status_code == 303
+    assert captured == {
+        "transaction_id": 123,
+        "status": "Joint",
+        "joint_amount": None,
+        "tip_percent": None,
+    }
 
 
 def test_status_joint_amount_logic() -> None:
