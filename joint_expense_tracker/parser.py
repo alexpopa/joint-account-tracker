@@ -5,21 +5,40 @@ from datetime import datetime, timedelta, timezone
 
 from .models import ParsedAlert
 
-AMOUNT_RE = re.compile(r"(?:\$|USD\s*)(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{2}))?", re.I)
+AMOUNT_RE = re.compile(r"(?:\$|USD\s*)(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{2}))?", re.I)
 LAST4_RE = re.compile(
     r"(?:ending(?:\s+in)?|card(?:\s+ending(?:\s+in)?)?|account(?:\s+ending(?:\s+in)?)?|acct)\s*(?:x{0,4}|[*]{0,4})\s*(\d{4})",
     re.I,
 )
+DATE_BOUNDARY = r"(?:\s+on\s+\w{3,9}\s+\d{1,2},?\s+\d{4}(?:\s+\d{1,2}:\d{2}\s*(?:AM|PM)?\s*ET)?|\s+on\s+\d{1,2}/\d{1,2}|\.\s*$|$)"
 
 MERCHANT_PATTERNS = [
-    re.compile(r"\btransaction\s+with\s+(.+?)(?:\s+on\s+\w{3,9}\s+\d{1,2},?\s+\d{4}|\s+on\s+\d{1,2}/\d{1,2}|\.\s*$|$)", re.I),
-    re.compile(r"\btransaction\s+of\s+\$[\d,.]+\s+with\s+(.+?)(?:\s+on\s+\w{3,9}\s+\d{1,2},?\s+\d{4}|\s+on\s+\d{1,2}/\d{1,2}|\.\s*$|$)", re.I),
-    re.compile(r"\bat\s+(.+?)(?:\s+on\s+\d{1,2}/\d{1,2}|\s+for\s+\$|\.\s*$|$)", re.I),
-    re.compile(r"\bfrom\s+(.+?)(?:\s+on\s+\d{1,2}/\d{1,2}|\s+for\s+\$|\.\s*$|$)", re.I),
+    re.compile(rf"\btransaction\s+with\s+(.+?){DATE_BOUNDARY}", re.I),
+    re.compile(rf"\btransaction\s+of\s+\$[\d,.]+\s+with\s+(.+?){DATE_BOUNDARY}", re.I),
+    re.compile(rf"\bexternal\s+transfer\s+to\s+(.+?){DATE_BOUNDARY}", re.I),
+    re.compile(rf"\bwire\s+transfer\s+to\s+(.+?){DATE_BOUNDARY}", re.I),
+    re.compile(rf"\btransfer\s+to\s+(.+?){DATE_BOUNDARY}", re.I),
+    re.compile(rf"\bpmt\s+made\s+to\s+(.+?){DATE_BOUNDARY}", re.I),
+    re.compile(r"\bpending\s+credit\s+from\s+(.+?)(?:\.\s*(?:[\x00-\x1f]|$)|[\x00-\x1f]|\s{2,}|$)", re.I),
+    re.compile(r"\b(?:we(?:'|’)ve|we have)\s+received\s+your\s+\$[\d,.]+\s+payment\b", re.I),
+    re.compile(r"\bautomatic\s+stmnt\s+balance\s+payment\s+is\s+scheduled\b", re.I),
+    re.compile(rf"\bDirect\s+Deposit\s+posted{DATE_BOUNDARY}", re.I),
+    re.compile(rf"\bat\s+(?!\d{{1,2}}:\d{{2}}\s)(.+?)(?:\s+on\s+\w{{3,9}}\s+\d{{1,2}},?\s+\d{{4}}|\s+on\s+\d{{1,2}}/\d{{1,2}}|\s+for\s+\$|\.\s*$|$)", re.I),
+    re.compile(rf"\bfrom\s+(.+?)(?:\s+on\s+\w{{3,9}}\s+\d{{1,2}},?\s+\d{{4}}|\s+on\s+\d{{1,2}}/\d{{1,2}}|\s+for\s+\$|\.\s*$|$)", re.I),
     re.compile(r"\bmerchant[:\s]+(.+?)(?:\.|$)", re.I),
 ]
 
-ACCOUNT_NAME_RE = re.compile(r"^(Chase\s+.+?)(?::\s+)", re.I)
+ACCOUNT_NAME_RE = re.compile(r"(Chase\s+[^:]{1,80}?)(?::\s+)", re.I)
+CREDIT_CARD_PAYMENT_RE = re.compile(
+    r"\b(?:pmt\s+made\s+to\s+CHASE\s+CARD|external\s+transfer\s+to\s+CHASE\s+CREDIT\s+CRD|payment\s+to\s+CHASE\s+(?:CARD|CREDIT)|(?:we(?:'|’)ve|we have)\s+received\s+your\s+\$[\d,.]+\s+payment|automatic\s+stmnt\s+balance\s+payment\s+is\s+scheduled)\b",
+    re.I,
+)
+DIRECT_DEPOSIT_RE = re.compile(r"\bDirect\s+Deposit\s+posted\b", re.I)
+PENDING_CREDIT_RE = re.compile(r"\bpending\s+credit\s+from\b", re.I)
+ALERT_SIGNAL_RE = re.compile(
+    r"\b(?:Chase|Purchase\s+alert|transaction\s+(?:with|of)|was\s+charged|card\s+ending|external\s+transfer|wire\s+transfer|ATM\s+withdrawal|Direct\s+Deposit|pmt\s+made|pending\s+credit|received\s+your\s+\$[\d,.]+\s+payment|stmnt\s+balance\s+payment)\b",
+    re.I,
+)
 
 
 def extract_amount(text: str) -> float | None:
@@ -41,12 +60,22 @@ def extract_last4(text: str) -> str | None:
 
 def extract_merchant(text: str) -> str:
     cleaned = " ".join(text.replace("\n", " ").split())
+    if DIRECT_DEPOSIT_RE.search(cleaned):
+        return "Direct Deposit"
     if re.search(r"\bATM withdrawal\b", cleaned, re.I):
         return "ATM withdrawal"
     for pattern in MERCHANT_PATTERNS:
         match = pattern.search(cleaned)
         if match:
-            merchant = match.group(1)
+            if not match.groups():
+                if re.search(r"\breceived\s+your\s+\$[\d,.]+\s+payment\b", cleaned, re.I):
+                    merchant = "Payment received"
+                elif re.search(r"\bautomatic\s+stmnt\s+balance\s+payment\s+is\s+scheduled\b", cleaned, re.I):
+                    merchant = "Statement balance payment"
+                else:
+                    merchant = "Direct Deposit"
+            else:
+                merchant = match.group(1)
             merchant = re.split(r"\s+(?:with|using|ending|card ending|was charged)\b", merchant, flags=re.I)[0]
             merchant = AMOUNT_RE.sub("", merchant)
             merchant = merchant.strip(" .,-:")
@@ -61,6 +90,17 @@ def extract_account_name(text: str) -> str | None:
     if not match:
         return None
     return match.group(1).strip()
+
+
+def default_status_for_alert(text: str) -> str:
+    cleaned = " ".join(text.replace("\n", " ").split())
+    if CREDIT_CARD_PAYMENT_RE.search(cleaned) or DIRECT_DEPOSIT_RE.search(cleaned) or PENDING_CREDIT_RE.search(cleaned):
+        return "Ignored"
+    return "Review"
+
+
+def looks_like_financial_alert(text: str) -> bool:
+    return ALERT_SIGNAL_RE.search(text) is not None
 
 
 def apple_timestamp_to_datetime(raw: object) -> datetime | None:
@@ -100,9 +140,11 @@ def parse_alert(
     *,
     message_date_raw: object | None = None,
     source_message_id: str | None = None,
-        source_guid: str | None = None,
+    source_guid: str | None = None,
     source_sender: str | None = None,
 ) -> ParsedAlert | None:
+    if not looks_like_financial_alert(text):
+        return None
     amount = extract_amount(text)
     if amount is None:
         return None
@@ -119,4 +161,5 @@ def parse_alert(
         source_sender=source_sender,
         source_date_raw=str(message_date_raw) if message_date_raw is not None else None,
         account_name=extract_account_name(text),
+        status=default_status_for_alert(text),
     )
