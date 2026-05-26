@@ -139,6 +139,7 @@ def dashboard_data(conn: sqlite3.Connection, month: str | None = None) -> dict[s
     all_months = months(conn)
     selected = month or (all_months[0] if all_months else utc_now()[:7])
     params = (selected,)
+    review_limit = 15
     totals_by_account = rows_to_dicts(
         conn.execute(
             """
@@ -156,25 +157,30 @@ def dashboard_data(conn: sqlite3.Connection, month: str | None = None) -> dict[s
     totals_by_status = rows_to_dicts(
         conn.execute(
             """
-            SELECT status, COUNT(*) AS count, ROUND(SUM(amount), 2) AS gross,
+            SELECT status, COUNT(*) AS count,
+                   ROUND(SUM(CASE WHEN status IN ('Joint', 'Split') THEN joint_amount ELSE amount END), 2) AS total,
                    ROUND(SUM(joint_amount), 2) AS joint_total
             FROM transactions
-            WHERE month = ?
+            WHERE month = ? AND status != 'Ignored'
             GROUP BY status
             ORDER BY status
             """,
             params,
         ).fetchall()
     )
+    needs_review_count = conn.execute(
+        "SELECT COUNT(*) AS count FROM transactions WHERE month = ? AND status = 'Review'",
+        params,
+    ).fetchone()["count"]
     review = rows_to_dicts(
         conn.execute(
             """
             SELECT * FROM transactions
             WHERE month = ? AND status = 'Review'
             ORDER BY transaction_datetime DESC
-            LIMIT 15
+            LIMIT ?
             """,
-            params,
+            (*params, review_limit),
         ).fetchall()
     )
     total_joint = conn.execute(
@@ -188,7 +194,9 @@ def dashboard_data(conn: sqlite3.Connection, month: str | None = None) -> dict[s
         "totals_by_account": totals_by_account,
         "totals_by_status": totals_by_status,
         "needs_review": review,
-        "needs_review_count": len(review),
+        "needs_review_count": needs_review_count,
+        "needs_review_display_count": len(review),
+        "needs_review_limit": review_limit,
         "statuses": STATUSES,
     }
 

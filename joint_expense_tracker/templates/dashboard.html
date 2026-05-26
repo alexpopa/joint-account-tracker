@@ -48,10 +48,17 @@
   <div>
     <h2>By Status</h2>
     <table>
-      <thead><tr><th>Status</th><th>Count</th><th class="money">Joint</th></tr></thead>
+      <thead><tr><th>Status</th><th>Count</th><th class="money">Total</th></tr></thead>
       <tbody>
-        {% for row in totals_by_status %}
-        <tr><td>{{ row.status }}</td><td>{{ row.count }}</td><td class="money">${{ "%.2f"|format(row.joint_total or 0) }}</td></tr>
+        {% for row in totals_by_status if row.status != "Ignored" %}
+        {% if row.total is defined %}
+          {% set status_total = row.total %}
+        {% elif row.status in ["Joint", "Split"] %}
+          {% set status_total = row.joint_total %}
+        {% else %}
+          {% set status_total = row.gross %}
+        {% endif %}
+        <tr><td>{{ row.status }}</td><td>{{ row.count }}</td><td class="money">${{ "%.2f"|format(status_total or 0) }}</td></tr>
         {% else %}
         <tr><td colspan="3">No status totals yet.</td></tr>
         {% endfor %}
@@ -62,6 +69,12 @@
 
 <section>
   <h2>Needs Review</h2>
+  {% if needs_review_count > needs_review_display_count %}
+  <p class="section-note">
+    Showing latest {{ needs_review_display_count }} of {{ needs_review_count }}.
+    <a href="/transactions?month={{ selected_month }}&status=Review">View all</a>
+  </p>
+  {% endif %}
   <table>
     <thead><tr><th>Date</th><th>Merchant</th><th class="money">Amount</th><th>Card</th><th>Actions</th></tr></thead>
     <tbody>

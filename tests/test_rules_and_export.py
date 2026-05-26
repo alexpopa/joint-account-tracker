@@ -4,10 +4,12 @@ import csv
 import sqlite3
 from pathlib import Path
 
+from jinja2 import Environment, FileSystemLoader, select_autoescape
+
 from joint_expense_tracker.db import init_db
 from joint_expense_tracker.models import ParsedAlert
 from joint_expense_tracker.rules import apply_rules, joint_amount_for_status, tip_amount_from_percent, tip_percent_from_amount
-from joint_expense_tracker.services import export_month, insert_alert, update_transaction
+from joint_expense_tracker.services import dashboard_data, export_month, insert_alert, update_transaction
 
 
 def test_status_joint_amount_logic() -> None:
@@ -162,6 +164,120 @@ def test_edit_can_set_account_name_without_last4(tmp_path: Path) -> None:
     conn.close()
     assert row["card_last4"] is None
     assert row["account_name"] == "Chase Sapphire Preferred Visa"
+
+
+def test_dashboard_review_count_is_not_limited_to_preview(tmp_path: Path) -> None:
+    db_path = tmp_path / "app.sqlite"
+    init_db(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    for index in range(18):
+        conn.execute(
+            """
+            INSERT INTO transactions (
+                transaction_datetime, month, amount, merchant, status,
+                joint_amount, raw_text, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                f"2026-05-{index + 1:02d}T12:00:00+00:00",
+                "2026-05",
+                10,
+                f"Review {index}",
+                "Review",
+                0,
+                "raw",
+                "now",
+                "now",
+            ),
+        )
+    data = dashboard_data(conn, "2026-05")
+    conn.close()
+
+    assert data["needs_review_count"] == 18
+    assert data["needs_review_display_count"] == 15
+    assert len(data["needs_review"]) == 15
+
+
+def test_dashboard_status_totals_mix_reimbursement_and_transaction_amounts(tmp_path: Path) -> None:
+    db_path = tmp_path / "app.sqlite"
+    init_db(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    rows = [
+        ("2026-05-01T12:00:00+00:00", "2026-05", 99.63, "Joint Store", "Joint", 111.63),
+        ("2026-05-02T12:00:00+00:00", "2026-05", 25, "Personal Store", "Personal", 0),
+        ("2026-05-03T12:00:00+00:00", "2026-05", 40, "Review Store", "Review", 0),
+        ("2026-05-04T12:00:00+00:00", "2026-05", 15, "Ignored Store", "Ignored", 0),
+    ]
+    conn.executemany(
+        """
+        INSERT INTO transactions (
+            transaction_datetime, month, amount, merchant, status,
+            joint_amount, raw_text, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 'raw', 'now', 'now')
+        """,
+        rows,
+    )
+
+    totals = {row["status"]: row["total"] for row in dashboard_data(conn, "2026-05")["totals_by_status"]}
+    conn.close()
+
+    assert totals == {
+        "Joint": 111.63,
+        "Personal": 25.0,
+        "Review": 40.0,
+    }
+
+
+def test_dashboard_status_table_renders_total() -> None:
+    template_dir = Path(__file__).resolve().parents[1] / "joint_expense_tracker" / "templates"
+    env = Environment(loader=FileSystemLoader(template_dir), autoescape=select_autoescape())
+    env.globals["url_for"] = lambda name, path: f"/static{path}"
+
+    rendered = env.get_template("dashboard.html").render(
+        months=["2026-05"],
+        selected_month="2026-05",
+        total_joint=111.63,
+        totals_by_account=[],
+        totals_by_status=[
+            {"status": "Joint", "count": 3, "total": 111.63, "joint_total": 111.63},
+        ],
+        needs_review=[],
+        needs_review_count=0,
+        needs_review_display_count=0,
+    )
+
+    assert "Total" in rendered
+    assert "$111.63" in rendered
+
+
+def test_dashboard_status_table_renders_old_server_shape() -> None:
+    template_dir = Path(__file__).resolve().parents[1] / "joint_expense_tracker" / "templates"
+    env = Environment(loader=FileSystemLoader(template_dir), autoescape=select_autoescape())
+    env.globals["url_for"] = lambda name, path: f"/static{path}"
+
+    rendered = env.get_template("dashboard.html").render(
+        months=["2026-05"],
+        selected_month="2026-05",
+        total_joint=111.63,
+        totals_by_account=[],
+        totals_by_status=[
+            {"status": "Ignored", "count": 7, "gross": 30332.67, "joint_total": 0.0},
+            {"status": "Joint", "count": 3, "gross": 99.63, "joint_total": 111.63},
+            {"status": "Personal", "count": 13, "gross": 578.73, "joint_total": 0.0},
+            {"status": "Review", "count": 104, "gross": 14978.58, "joint_total": 0.0},
+        ],
+        needs_review=[],
+        needs_review_count=0,
+        needs_review_display_count=0,
+    )
+
+    assert "$30332.67" not in rendered
+    assert "Ignored" not in rendered
+    assert "$111.63" in rendered
+    assert "$578.73" in rendered
+    assert "$14978.58" in rendered
 
 
 def test_rule_application_joint(tmp_path: Path) -> None:
