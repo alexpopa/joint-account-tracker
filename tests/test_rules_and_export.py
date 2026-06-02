@@ -6,29 +6,30 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from joint_expense_tracker.db import init_db
+from joint_expense_tracker.db import get_db, init_db
 from joint_expense_tracker.models import ParsedAlert
 from joint_expense_tracker.rules import apply_rules, joint_amount_for_status, tip_amount_from_percent, tip_percent_from_amount
-from joint_expense_tracker.services import dashboard_data, export_month, insert_alert, update_transaction
+from joint_expense_tracker.services import classify_transaction, dashboard_data, export_month, insert_alert, update_transaction
 from joint_expense_tracker.web import classify
 
 
 def test_quick_joint_allows_blank_tip_percent(monkeypatch) -> None:
     captured = {}
 
-    def fake_classify_transaction(transaction_id, status, joint_amount=None, tip_percent=None) -> None:
+    def fake_classify_transaction(transaction_id, status, joint_amount=None, tip_percent=None, tip_amount=None) -> None:
         captured.update(
             {
                 "transaction_id": transaction_id,
                 "status": status,
                 "joint_amount": joint_amount,
                 "tip_percent": tip_percent,
+                "tip_amount": tip_amount,
             }
         )
 
     monkeypatch.setattr("joint_expense_tracker.web.classify_transaction", fake_classify_transaction)
 
-    response = classify(123, status="Joint", joint_amount=None, tip_percent="", return_to="/transactions")
+    response = classify(123, status="Joint", joint_amount=None, tip_percent="", tip_amount="", return_to="/transactions")
 
     assert response.status_code == 303
     assert captured == {
@@ -36,6 +37,7 @@ def test_quick_joint_allows_blank_tip_percent(monkeypatch) -> None:
         "status": "Joint",
         "joint_amount": None,
         "tip_percent": None,
+        "tip_amount": None,
     }
 
 
@@ -84,6 +86,68 @@ def test_edit_tip_amount_updates_percent_and_joint_amount(tmp_path: Path) -> Non
     assert row["tip_amount"] == 16.04
     assert row["tip_percent"] == 20.0
     assert row["joint_amount"] == 96.22
+
+
+def test_quick_classify_tip_amount_updates_existing_tip_fields(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "app.sqlite"
+    init_db(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        """
+        INSERT INTO transactions (
+            transaction_datetime, month, amount, merchant, status, joint_amount,
+            raw_text, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("2026-05-01T12:00:00+00:00", "2026-05", 80.18, "Test Restaurant", "Review", 0, "raw", "now", "now"),
+    )
+    tx_id = conn.execute("SELECT id FROM transactions").fetchone()["id"]
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr("joint_expense_tracker.services.get_db", lambda: get_db(db_path))
+
+    classify_transaction(tx_id, "Joint", tip_amount=16.04)
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT status, tip_percent, tip_amount, joint_amount FROM transactions WHERE id = ?", (tx_id,)).fetchone()
+    conn.close()
+    assert row["status"] == "Joint"
+    assert row["tip_amount"] == 16.04
+    assert row["tip_percent"] == 20.0
+    assert row["joint_amount"] == 96.22
+
+
+def test_quick_personal_saves_tip_amount_without_joint_amount(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "app.sqlite"
+    init_db(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        """
+        INSERT INTO transactions (
+            transaction_datetime, month, amount, merchant, status, joint_amount,
+            raw_text, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("2026-05-01T12:00:00+00:00", "2026-05", 50, "Test Restaurant", "Review", 0, "raw", "now", "now"),
+    )
+    tx_id = conn.execute("SELECT id FROM transactions").fetchone()["id"]
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr("joint_expense_tracker.services.get_db", lambda: get_db(db_path))
+
+    classify_transaction(tx_id, "Personal", tip_amount=10)
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT status, tip_percent, tip_amount, joint_amount FROM transactions WHERE id = ?", (tx_id,)).fetchone()
+    conn.close()
+    assert row["status"] == "Personal"
+    assert row["tip_amount"] == 10
+    assert row["tip_percent"] == 20.0
+    assert row["joint_amount"] == 0
 
 
 def test_edit_tip_does_not_force_joint_status(tmp_path: Path) -> None:

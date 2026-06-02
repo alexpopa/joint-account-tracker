@@ -11,9 +11,11 @@
   <select name="active"><option value="1">Active</option><option value="0">Inactive</option></select>
   <button>Add Rule</button>
 </form>
-<table><thead><tr><th>Match</th><th>Field</th><th>Status</th><th>Split</th><th>Priority</th><th>Active</th><th></th></tr></thead><tbody>
-{% for rule in rules %}
-<tr><td>{{ rule.match_text }}</td><td>{{ rule.match_field }}</td><td>{{ rule.default_status }}</td><td>{{ rule.default_joint_percent or rule.default_joint_amount or "" }}</td><td>{{ rule.priority }}</td><td>{{ "Yes" if rule.active else "No" }}</td><td><form method="post" action="/rules/{{ rule.id }}/delete"><button>Delete</button></form></td></tr>
-{% else %}<tr><td colspan="7">No rules configured.</td></tr>{% endfor %}
-</tbody></table>
+<div class="table-wrap">
+  <table><thead><tr><th>Match</th><th>Field</th><th>Status</th><th>Split</th><th>Priority</th><th>Active</th><th></th></tr></thead><tbody>
+  {% for rule in rules %}
+  <tr><td>{{ rule.match_text }}</td><td>{{ rule.match_field }}</td><td>{{ rule.default_status }}</td><td>{{ rule.default_joint_percent or rule.default_joint_amount or "" }}</td><td>{{ rule.priority }}</td><td>{{ "Yes" if rule.active else "No" }}</td><td><form method="post" action="/rules/{{ rule.id }}/delete"><button>Delete</button></form></td></tr>
+  {% else %}<tr><td colspan="7">No rules configured.</td></tr>{% endfor %}
+  </tbody></table>
+</div>
 {% endblock %}

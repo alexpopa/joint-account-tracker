@@ -64,6 +64,7 @@ def classify_transaction(
     status: str,
     joint_amount: float | None = None,
     tip_percent: float | None = None,
+    tip_amount: float | None = None,
 ) -> None:
     status = normalize_status(status)
     with get_db() as conn:
@@ -71,7 +72,14 @@ def classify_transaction(
         if not row:
             return
         amount = float(row["amount"])
-        tip_amount = tip_amount_from_percent(amount, tip_percent) if status == "Joint" else 0.0
+        if tip_amount is not None:
+            tip_amount = round(max(0.0, tip_amount), 2)
+            tip_percent = tip_percent_from_amount(amount, tip_amount)
+        elif tip_percent is not None:
+            tip_percent = max(0.0, tip_percent)
+            tip_amount = tip_amount_from_percent(amount, tip_percent)
+        else:
+            tip_amount = 0.0
         computed = joint_amount_for_status(status, amount, joint_amount, tip_amount)
         conn.execute(
             """
@@ -79,7 +87,7 @@ def classify_transaction(
             SET status = ?, joint_amount = ?, tip_percent = ?, tip_amount = ?, updated_at = ?
             WHERE id = ?
             """,
-            (status, round(computed, 2), tip_percent if status == "Joint" else None, round(tip_amount, 2), utc_now(), transaction_id),
+            (status, round(computed, 2), tip_percent if status != "Ignored" else None, round(tip_amount, 2), utc_now(), transaction_id),
         )
 
 

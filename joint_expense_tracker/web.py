@@ -119,6 +119,7 @@ def classify(
     status: str = Form(...),
     joint_amount: Optional[str] = Form(None),
     tip_percent: Optional[str] = Form(None),
+    tip_amount: Optional[str] = Form(None),
     return_to: str = Form("/transactions"),
 ):
     classify_transaction(
@@ -126,6 +127,7 @@ def classify(
         status,
         optional_float(joint_amount, "joint_amount"),
         optional_float(tip_percent, "tip_percent"),
+        optional_float(tip_amount, "tip_amount"),
     )
     return redirect(return_to)
 

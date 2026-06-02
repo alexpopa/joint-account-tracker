@@ -34,36 +34,40 @@
 <section class="grid-two">
   <div>
     <h2>By Card/Account</h2>
-    <table>
-      <thead><tr><th>Account</th><th class="money">Joint Total</th></tr></thead>
-      <tbody>
-        {% for row in totals_by_account %}
-        <tr><td>{{ row.label }}</td><td class="money">${{ "%.2f"|format(row.total or 0) }}</td></tr>
-        {% else %}
-        <tr><td colspan="2">No transactions yet.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Account</th><th class="money">Joint Total</th></tr></thead>
+        <tbody>
+          {% for row in totals_by_account %}
+          <tr><td>{{ row.label }}</td><td class="money">${{ "%.2f"|format(row.total or 0) }}</td></tr>
+          {% else %}
+          <tr><td colspan="2">No transactions yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </div>
   <div>
     <h2>By Status</h2>
-    <table>
-      <thead><tr><th>Status</th><th>Count</th><th class="money">Total</th></tr></thead>
-      <tbody>
-        {% for row in totals_by_status if row.status != "Ignored" %}
-        {% if row.total is defined %}
-          {% set status_total = row.total %}
-        {% elif row.status in ["Joint", "Split"] %}
-          {% set status_total = row.joint_total %}
-        {% else %}
-          {% set status_total = row.gross %}
-        {% endif %}
-        <tr><td>{{ row.status }}</td><td>{{ row.count }}</td><td class="money">${{ "%.2f"|format(status_total or 0) }}</td></tr>
-        {% else %}
-        <tr><td colspan="3">No status totals yet.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Status</th><th>Count</th><th class="money">Total</th></tr></thead>
+        <tbody>
+          {% for row in totals_by_status if row.status != "Ignored" %}
+          {% if row.total is defined %}
+            {% set status_total = row.total %}
+          {% elif row.status in ["Joint", "Split"] %}
+            {% set status_total = row.joint_total %}
+          {% else %}
+            {% set status_total = row.gross %}
+          {% endif %}
+          <tr><td>{{ row.status }}</td><td>{{ row.count }}</td><td class="money">${{ "%.2f"|format(status_total or 0) }}</td></tr>
+          {% else %}
+          <tr><td colspan="3">No status totals yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </div>
 </section>
 
@@ -75,36 +79,38 @@
     <a href="/transactions?month={{ selected_month }}&status=Review">View all</a>
   </p>
   {% endif %}
-  <table>
-    <thead><tr><th>Date</th><th>Merchant</th><th class="money">Amount</th><th>Card</th><th>Actions</th></tr></thead>
-    <tbody>
-      {% for tx in needs_review %}
-      <tr>
-        <td>{{ tx.transaction_datetime[:10] }}</td>
-        <td>{{ tx.merchant }}</td>
-        <td class="money">${{ "%.2f"|format(tx.amount) }}</td>
-        <td>{{ tx.account_name or tx.card_last4 or "Unknown" }}</td>
-        <td class="row-actions">
-          <form method="post" action="/transactions/{{ tx.id }}/classify" class="tip-form">
-            <input type="hidden" name="status" value="Joint">
-            <input type="hidden" name="return_to" value="/">
-            <input name="tip_percent" type="number" min="0" max="100" step="0.1" placeholder="Tip %">
-            <button>Joint</button>
-          </form>
-          {% for status in ["Personal", "Review", "Ignored"] %}
-          <form method="post" action="/transactions/{{ tx.id }}/classify">
-            <input type="hidden" name="status" value="{{ status }}">
-            <input type="hidden" name="return_to" value="/">
-            <button>{{ status }}</button>
-          </form>
-          {% endfor %}
-          <a href="/transactions/{{ tx.id }}/edit">Edit</a>
-        </td>
-      </tr>
-      {% else %}
-      <tr><td colspan="5">Nothing waiting for review.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Date</th><th>Merchant</th><th class="money">Amount</th><th>Card</th><th>Actions</th></tr></thead>
+      <tbody>
+        {% for tx in needs_review %}
+        <tr>
+          <td>{{ tx.transaction_datetime[:10] }}</td>
+          <td>{{ tx.merchant }}</td>
+          <td class="money">${{ "%.2f"|format(tx.amount) }}</td>
+          <td>{{ tx.account_name or tx.card_last4 or "Unknown" }}</td>
+          <td class="row-actions">
+            <form method="post" action="/transactions/{{ tx.id }}/classify" class="tip-form">
+              <input type="hidden" name="return_to" value="/">
+              <input name="tip_amount" type="number" min="0" step="0.01" placeholder="Tip $">
+              <button name="status" value="Joint">Joint</button>
+              <button name="status" value="Personal">Personal</button>
+            </form>
+            {% for status in ["Review", "Ignored"] %}
+            <form method="post" action="/transactions/{{ tx.id }}/classify">
+              <input type="hidden" name="status" value="{{ status }}">
+              <input type="hidden" name="return_to" value="/">
+              <button>{{ status }}</button>
+            </form>
+            {% endfor %}
+            <a href="/transactions/{{ tx.id }}/edit">Edit</a>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5">Nothing waiting for review.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 {% endblock %}

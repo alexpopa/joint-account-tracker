@@ -106,13 +106,18 @@ textarea { min-height: 120px; resize: vertical; }
 .metric.action-metric:visited { color: #fff; }
 
 .grid-two { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
-table {
+.table-wrap {
   width: 100%;
-  border-collapse: collapse;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
   overflow: hidden;
+}
+.table-wrap table {
+  width: 100%;
+  min-width: max-content;
+  border-collapse: collapse;
+  background: var(--panel);
 }
 th, td { padding: 11px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 th { color: var(--muted); font-size: 13px; background: #fbfcfa; }
@@ -158,5 +163,6 @@ tr:last-child td { border-bottom: 0; }
   .topbar, .page-head { align-items: flex-start; flex-direction: column; }
   .metrics, .grid-two { grid-template-columns: 1fr; }
   .shell { padding: 18px; }
-  table { display: block; overflow-x: auto; }
+  .table-wrap { overflow-x: auto; }
+  .table-wrap table { min-width: 100%; }
 }

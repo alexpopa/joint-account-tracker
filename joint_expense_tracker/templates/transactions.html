@@ -10,51 +10,53 @@
   <input name="q" value="{{ filters.q }}" placeholder="Search merchant/raw text">
   <button>Filter</button>
 </form>
-<table>
-  <thead><tr><th>Date</th><th>Merchant</th><th class="money">Amount</th><th class="money">Tip</th><th>Card</th><th>Status</th><th class="money">Joint</th><th>Note</th><th>Actions</th></tr></thead>
-  <tbody>
-    {% for tx in transactions %}
-    <tr>
-      <td>{{ tx.transaction_datetime[:10] }}</td>
-      <td>{{ tx.merchant }}</td>
-      <td class="money">${{ "%.2f"|format(tx.amount) }}</td>
-      <td class="money">
-        {% if tx.tip_amount %}
-        ${{ "%.2f"|format(tx.tip_amount) }}{% if tx.tip_percent %} ({{ "%.1f"|format(tx.tip_percent) }}%){% endif %}
-        {% else %}
-        -
-        {% endif %}
-      </td>
-      <td>{{ tx.account_name or tx.card_last4 or "Unknown" }}</td>
-      <td><span class="pill">{{ tx.status }}</span></td>
-      <td class="money">${{ "%.2f"|format(tx.joint_amount) }}</td>
-      <td>{{ tx.note or "" }}</td>
-      <td class="row-actions">
-        <form method="post" action="/transactions/{{ tx.id }}/classify" class="tip-form">
-          <input type="hidden" name="status" value="Joint">
-          <input type="hidden" name="return_to" value="/transactions?month={{ filters.month }}&status={{ filters.status }}&account={{ filters.account }}&q={{ filters.q }}">
-          <input name="tip_percent" type="number" min="0" max="100" step="0.1" placeholder="Tip %">
-          <button>Joint</button>
-        </form>
-        {% for status in ["Personal", "Review", "Ignored"] %}
-        <form method="post" action="/transactions/{{ tx.id }}/classify">
-          <input type="hidden" name="status" value="{{ status }}">
-          <input type="hidden" name="return_to" value="/transactions?month={{ filters.month }}&status={{ filters.status }}&account={{ filters.account }}&q={{ filters.q }}">
-          <button>{{ status }}</button>
-        </form>
-        {% endfor %}
-        <form method="post" action="/transactions/{{ tx.id }}/classify" class="split-form">
-          <input type="hidden" name="status" value="Split">
-          <input type="hidden" name="return_to" value="/transactions?month={{ filters.month }}&status={{ filters.status }}&account={{ filters.account }}&q={{ filters.q }}">
-          <input name="joint_amount" type="number" min="0" step="0.01" placeholder="Split $">
-          <button>Split</button>
-        </form>
-        <a href="/transactions/{{ tx.id }}/edit">Edit</a>
-      </td>
-    </tr>
-    {% else %}
-    <tr><td colspan="9">No transactions match these filters.</td></tr>
-    {% endfor %}
-  </tbody>
-</table>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Date</th><th>Merchant</th><th class="money">Amount</th><th class="money">Tip</th><th>Card</th><th>Status</th><th class="money">Joint</th><th>Note</th><th>Actions</th></tr></thead>
+    <tbody>
+      {% for tx in transactions %}
+      <tr>
+        <td>{{ tx.transaction_datetime[:10] }}</td>
+        <td>{{ tx.merchant }}</td>
+        <td class="money">${{ "%.2f"|format(tx.amount) }}</td>
+        <td class="money">
+          {% if tx.tip_amount %}
+          ${{ "%.2f"|format(tx.tip_amount) }}{% if tx.tip_percent %} ({{ "%.1f"|format(tx.tip_percent) }}%){% endif %}
+          {% else %}
+          -
+          {% endif %}
+        </td>
+        <td>{{ tx.account_name or tx.card_last4 or "Unknown" }}</td>
+        <td><span class="pill">{{ tx.status }}</span></td>
+        <td class="money">${{ "%.2f"|format(tx.joint_amount) }}</td>
+        <td>{{ tx.note or "" }}</td>
+        <td class="row-actions">
+          <form method="post" action="/transactions/{{ tx.id }}/classify" class="tip-form">
+            <input type="hidden" name="return_to" value="/transactions?month={{ filters.month }}&status={{ filters.status }}&account={{ filters.account }}&q={{ filters.q }}">
+            <input name="tip_amount" type="number" min="0" step="0.01" placeholder="Tip $">
+            <button name="status" value="Joint">Joint</button>
+            <button name="status" value="Personal">Personal</button>
+          </form>
+          {% for status in ["Review", "Ignored"] %}
+          <form method="post" action="/transactions/{{ tx.id }}/classify">
+            <input type="hidden" name="status" value="{{ status }}">
+            <input type="hidden" name="return_to" value="/transactions?month={{ filters.month }}&status={{ filters.status }}&account={{ filters.account }}&q={{ filters.q }}">
+            <button>{{ status }}</button>
+          </form>
+          {% endfor %}
+          <form method="post" action="/transactions/{{ tx.id }}/classify" class="split-form">
+            <input type="hidden" name="status" value="Split">
+            <input type="hidden" name="return_to" value="/transactions?month={{ filters.month }}&status={{ filters.status }}&account={{ filters.account }}&q={{ filters.q }}">
+            <input name="joint_amount" type="number" min="0" step="0.01" placeholder="Split $">
+            <button>Split</button>
+          </form>
+          <a href="/transactions/{{ tx.id }}/edit">Edit</a>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="9">No transactions match these filters.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 {% endblock %}
