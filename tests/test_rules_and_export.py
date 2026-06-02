@@ -44,6 +44,8 @@ def test_quick_joint_allows_blank_tip_percent(monkeypatch) -> None:
 def test_status_joint_amount_logic() -> None:
     assert joint_amount_for_status("Joint", 30) == 30
     assert joint_amount_for_status("Joint", 30, tip_amount=6) == 36
+    assert joint_amount_for_status("Her", 30) == 30
+    assert joint_amount_for_status("Her", 30, tip_amount=6) == 36
     assert joint_amount_for_status("Personal", 30) == 0
     assert joint_amount_for_status("Ignored", 30) == 0
     assert joint_amount_for_status("Split", 30, 12.5) == 12.5
@@ -148,6 +150,37 @@ def test_quick_personal_saves_tip_amount_without_joint_amount(tmp_path: Path, mo
     assert row["tip_amount"] == 10
     assert row["tip_percent"] == 20.0
     assert row["joint_amount"] == 0
+
+
+def test_quick_her_saves_venmo_amount_with_tip(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "app.sqlite"
+    init_db(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        """
+        INSERT INTO transactions (
+            transaction_datetime, month, amount, merchant, status, joint_amount,
+            raw_text, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("2026-05-01T12:00:00+00:00", "2026-05", 50, "Test Restaurant", "Review", 0, "raw", "now", "now"),
+    )
+    tx_id = conn.execute("SELECT id FROM transactions").fetchone()["id"]
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr("joint_expense_tracker.services.get_db", lambda: get_db(db_path))
+
+    classify_transaction(tx_id, "Her", tip_amount=10)
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT status, tip_percent, tip_amount, joint_amount FROM transactions WHERE id = ?", (tx_id,)).fetchone()
+    conn.close()
+    assert row["status"] == "Her"
+    assert row["tip_amount"] == 10
+    assert row["tip_percent"] == 20.0
+    assert row["joint_amount"] == 60
 
 
 def test_edit_tip_does_not_force_joint_status(tmp_path: Path) -> None:
@@ -300,6 +333,7 @@ def test_dashboard_status_totals_mix_reimbursement_and_transaction_amounts(tmp_p
         ("2026-05-02T12:00:00+00:00", "2026-05", 25, "Personal Store", "Personal", 0),
         ("2026-05-03T12:00:00+00:00", "2026-05", 40, "Review Store", "Review", 0),
         ("2026-05-04T12:00:00+00:00", "2026-05", 15, "Ignored Store", "Ignored", 0),
+        ("2026-05-05T12:00:00+00:00", "2026-05", 70, "Her Store", "Her", 82),
     ]
     conn.executemany(
         """
@@ -315,10 +349,39 @@ def test_dashboard_status_totals_mix_reimbursement_and_transaction_amounts(tmp_p
     conn.close()
 
     assert totals == {
+        "Her": 82.0,
         "Joint": 111.63,
         "Personal": 25.0,
         "Review": 40.0,
     }
+
+
+def test_dashboard_separates_joint_and_venmo_totals(tmp_path: Path) -> None:
+    db_path = tmp_path / "app.sqlite"
+    init_db(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    rows = [
+        ("2026-05-01T12:00:00+00:00", "2026-05", 100, "Joint Store", "Joint", 120, "Card A"),
+        ("2026-05-02T12:00:00+00:00", "2026-05", 40, "Split Store", "Split", 15, "Card A"),
+        ("2026-05-03T12:00:00+00:00", "2026-05", 70, "Her Store", "Her", 82, "Card A"),
+    ]
+    conn.executemany(
+        """
+        INSERT INTO transactions (
+            transaction_datetime, month, amount, merchant, status,
+            joint_amount, account_name, raw_text, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'raw', 'now', 'now')
+        """,
+        rows,
+    )
+
+    data = dashboard_data(conn, "2026-05")
+    conn.close()
+
+    assert data["total_joint"] == 135.0
+    assert data["total_venmo"] == 82.0
+    assert data["totals_by_account"][0]["total"] == 135.0
 
 
 def test_dashboard_status_table_renders_total() -> None:
@@ -330,6 +393,7 @@ def test_dashboard_status_table_renders_total() -> None:
         months=["2026-05"],
         selected_month="2026-05",
         total_joint=111.63,
+        total_venmo=82.0,
         totals_by_account=[],
         totals_by_status=[
             {"status": "Joint", "count": 3, "total": 111.63, "joint_total": 111.63},
@@ -341,6 +405,8 @@ def test_dashboard_status_table_renders_total() -> None:
 
     assert "Total" in rendered
     assert "$111.63" in rendered
+    assert "Total to request via Venmo" in rendered
+    assert "$82.00" in rendered
 
 
 def test_dashboard_status_table_renders_old_server_shape() -> None:
@@ -352,6 +418,7 @@ def test_dashboard_status_table_renders_old_server_shape() -> None:
         months=["2026-05"],
         selected_month="2026-05",
         total_joint=111.63,
+        total_venmo=0.0,
         totals_by_account=[],
         totals_by_status=[
             {"status": "Ignored", "count": 7, "gross": 30332.67, "joint_total": 0.0},

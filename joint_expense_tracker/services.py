@@ -153,7 +153,7 @@ def dashboard_data(conn: sqlite3.Connection, month: str | None = None) -> dict[s
             """
             SELECT COALESCE(account_name, card_last4, 'Unknown') AS label,
                    COALESCE(card_last4, '') AS card_last4,
-                   ROUND(SUM(joint_amount), 2) AS total
+                   ROUND(SUM(CASE WHEN status IN ('Joint', 'Split') THEN joint_amount ELSE 0 END), 2) AS total
             FROM transactions
             WHERE month = ? AND status != 'Ignored'
             GROUP BY label, card_last4
@@ -166,8 +166,9 @@ def dashboard_data(conn: sqlite3.Connection, month: str | None = None) -> dict[s
         conn.execute(
             """
             SELECT status, COUNT(*) AS count,
-                   ROUND(SUM(CASE WHEN status IN ('Joint', 'Split') THEN joint_amount ELSE amount END), 2) AS total,
-                   ROUND(SUM(joint_amount), 2) AS joint_total
+                   ROUND(SUM(CASE WHEN status IN ('Joint', 'Split', 'Her') THEN joint_amount ELSE amount END), 2) AS total,
+                   ROUND(SUM(CASE WHEN status IN ('Joint', 'Split') THEN joint_amount ELSE 0 END), 2) AS joint_total,
+                   ROUND(SUM(CASE WHEN status = 'Her' THEN joint_amount ELSE 0 END), 2) AS venmo_total
             FROM transactions
             WHERE month = ? AND status != 'Ignored'
             GROUP BY status
@@ -192,13 +193,18 @@ def dashboard_data(conn: sqlite3.Connection, month: str | None = None) -> dict[s
         ).fetchall()
     )
     total_joint = conn.execute(
-        "SELECT ROUND(COALESCE(SUM(joint_amount), 0), 2) AS total FROM transactions WHERE month = ? AND status != 'Ignored'",
+        "SELECT ROUND(COALESCE(SUM(joint_amount), 0), 2) AS total FROM transactions WHERE month = ? AND status IN ('Joint', 'Split')",
+        params,
+    ).fetchone()["total"]
+    total_venmo = conn.execute(
+        "SELECT ROUND(COALESCE(SUM(joint_amount), 0), 2) AS total FROM transactions WHERE month = ? AND status = 'Her'",
         params,
     ).fetchone()["total"]
     return {
         "months": all_months,
         "selected_month": selected,
         "total_joint": total_joint or 0,
+        "total_venmo": total_venmo or 0,
         "totals_by_account": totals_by_account,
         "totals_by_status": totals_by_status,
         "needs_review": review,
@@ -252,8 +258,12 @@ def export_month(month: str, db_path: Path = DB_PATH, export_dir: Path = EXPORT_
             writer = csv.writer(f)
             writer.writerow(["Metric", "Label", "Value"])
             writer.writerow(["total_joint_reimbursement", month, data["total_joint"]])
+            writer.writerow(["total_venmo_request", month, data["total_venmo"]])
             for row in data["totals_by_account"]:
                 writer.writerow(["total_by_account", row["label"], row["total"]])
             for row in data["totals_by_status"]:
-                writer.writerow(["total_by_status", row["status"], row["joint_total"]])
+                if row["status"] == "Her":
+                    writer.writerow(["total_by_status", row["status"], row["venmo_total"]])
+                else:
+                    writer.writerow(["total_by_status", row["status"], row["joint_total"]])
     return transaction_path, summary_path

@@ -12,7 +12,7 @@ DEFAULT_MESSAGES_DB = Path.home() / "Library" / "Messages" / "chat.db"
 DEFAULT_CHASE_SENDERS = ["24273", "28107", "33172", "72166", "74869"]
 DEFAULT_CHASE_KEYWORDS = ["Chase", "purchase", "card", "ending", "was charged", "alert"]
 
-STATUSES = ["Joint", "Personal", "Split", "Review", "Ignored"]
+STATUSES = ["Joint", "Personal", "Her", "Split", "Review", "Ignored"]
 
 
 def ensure_data_dirs() -> None:

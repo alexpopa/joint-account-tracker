@@ -34,7 +34,7 @@
 
   function updateJointTotalForCurrentStatus() {
     const tip = Number(tipAmount.value || "0");
-    if (status.value === "Joint") {
+    if (status.value === "Joint" || status.value === "Her") {
       jointAmount.value = money(amount + tip);
     }
   }
@@ -57,7 +57,7 @@
   });
 
   status.addEventListener("change", () => {
-    if (status.value === "Joint") {
+    if (status.value === "Joint" || status.value === "Her") {
       updateJointTotalForCurrentStatus();
     }
   });

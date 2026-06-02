@@ -24,7 +24,7 @@ def joint_amount_for_status(
     joint_amount: float | None = None,
     tip_amount: float = 0.0,
 ) -> float:
-    if status == "Joint":
+    if status in {"Joint", "Her"}:
         return amount + max(0.0, tip_amount)
     if status == "Split":
         return max(0.0, min(amount, float(joint_amount or 0.0)))
@@ -55,7 +55,7 @@ def apply_rules(conn: sqlite3.Connection, alert: ParsedAlert) -> ParsedAlert:
         if match_text and match_text in haystack:
             status = normalize_status(str(row["default_status"]))
             alert.status = status
-            if status == "Joint":
+            if status in {"Joint", "Her"}:
                 alert.joint_amount = alert.amount
             elif status == "Split":
                 if row["default_joint_amount"] is not None:

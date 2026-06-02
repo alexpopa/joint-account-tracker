@@ -36,6 +36,7 @@
             <input name="tip_amount" type="number" min="0" step="0.01" placeholder="Tip $">
             <button name="status" value="Joint">Joint</button>
             <button name="status" value="Personal">Personal</button>
+            <button name="status" value="Her">Her</button>
           </form>
           {% for status in ["Review", "Ignored"] %}
           <form method="post" action="/transactions/{{ tx.id }}/classify">
