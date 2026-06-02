@@ -7,7 +7,7 @@
   <string>com.alexandrupopa.joint-expense-tracker</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/alexandrupopa/Documents/Joint Account Tracker/.venv/bin/python</string>
+    <string>/Users/alexandrupopa/.joint-expense-tracker/service-app/.venv/bin/python</string>
     <string>-m</string>
     <string>joint_expense_tracker</string>
     <string>web</string>
@@ -17,14 +17,24 @@
     <string>8787</string>
   </array>
   <key>WorkingDirectory</key>
-  <string>/Users/alexandrupopa/Documents/Joint Account Tracker</string>
+  <string>/Users/alexandrupopa/.joint-expense-tracker/service-app</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>/Users/alexandrupopa</string>
+    <key>PATH</key>
+    <string>/Users/alexandrupopa/.joint-expense-tracker/service-app/.venv/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
   <key>StandardOutPath</key>
-  <string>/Users/alexandrupopa/Documents/Joint Account Tracker/launchd/manual-web.log</string>
+  <string>/Users/alexandrupopa/.joint-expense-tracker/service-app/launchd/manual-web.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/alexandrupopa/Documents/Joint Account Tracker/launchd/manual-web.log</string>
+  <string>/Users/alexandrupopa/.joint-expense-tracker/service-app/launchd/manual-web.err.log</string>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
-  <true/>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
 </dict>
 </plist>
