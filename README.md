@@ -6,7 +6,7 @@ Local-only Mac app for importing Chase SMS purchase alerts from Apple Messages, 
 
 - Runs locally on your Mac.
 - Does not use Plaid, Chase APIs, cloud sync, or external services.
-- Serves the web app on `127.0.0.1:8787` by default.
+- For this workspace, launch the web app for Tailscale access on port `8787`.
 - Stores app data in `~/.joint-expense-tracker/`.
 - Copies `chat.db`, `chat.db-wal`, and `chat.db-shm` into `~/.joint-expense-tracker/messages_snapshot/` before querying.
 - Opens the copied Messages database read-only.
@@ -20,10 +20,10 @@ source .venv/bin/activate
 pip install -r requirements.txt
 python -m joint_expense_tracker init
 python -m joint_expense_tracker import-messages
-python -m joint_expense_tracker web
+python -m joint_expense_tracker web --host 0.0.0.0 --port 8787
 ```
 
-Open [http://127.0.0.1:8787](http://127.0.0.1:8787).
+Open `http://<tailscale-ip-or-hostname>:8787` from a Tailscale-connected device, or [http://127.0.0.1:8787](http://127.0.0.1:8787) on this Mac.
 
 ## Commands
 
@@ -32,7 +32,7 @@ python -m joint_expense_tracker init
 python -m joint_expense_tracker diagnose-messages
 python -m joint_expense_tracker import-messages
 python -m joint_expense_tracker export --month 2026-05
-python -m joint_expense_tracker web
+python -m joint_expense_tracker web --host 0.0.0.0 --port 8787
 ```
 
 ## Full Disk Access

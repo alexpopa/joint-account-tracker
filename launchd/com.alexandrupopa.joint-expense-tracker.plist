@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.alexandrupopa.joint-expense-tracker</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/alexandrupopa/Documents/Joint Account Tracker/.venv/bin/python</string>
+    <string>-m</string>
+    <string>joint_expense_tracker</string>
+    <string>web</string>
+    <string>--host</string>
+    <string>0.0.0.0</string>
+    <string>--port</string>
+    <string>8787</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/alexandrupopa/Documents/Joint Account Tracker</string>
+  <key>StandardOutPath</key>
+  <string>/Users/alexandrupopa/Documents/Joint Account Tracker/launchd/manual-web.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/alexandrupopa/Documents/Joint Account Tracker/launchd/manual-web.log</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+</dict>
+</plist>

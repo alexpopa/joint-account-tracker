@@ -5,6 +5,8 @@ __pycache__/
 .DS_Store
 joint-expense-tracker-dashboard.png
 AGENTS.local.md
+AGENTS.md
+launchd/*.log
 
 # Local app data and imported financial/message exports
 .joint-expense-tracker/
