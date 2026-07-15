@@ -7,7 +7,7 @@
   <string>com.alexandrupopa.joint-expense-tracker</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/alexandrupopa/.joint-expense-tracker/service-app/.venv/bin/python</string>
+    <string>/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/Resources/Python.app/Contents/MacOS/Python</string>
     <string>-m</string>
     <string>joint_expense_tracker</string>
     <string>web</string>
@@ -24,6 +24,8 @@
     <string>/Users/alexandrupopa</string>
     <key>PATH</key>
     <string>/Users/alexandrupopa/.joint-expense-tracker/service-app/.venv/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>PYTHONPATH</key>
+    <string>/Users/alexandrupopa/.joint-expense-tracker/service-app:/Users/alexandrupopa/.joint-expense-tracker/service-app/.venv/lib/python3.9/site-packages</string>
   </dict>
   <key>StandardOutPath</key>
   <string>/Users/alexandrupopa/.joint-expense-tracker/service-app/launchd/manual-web.log</string>
@@ -31,6 +33,8 @@
   <string>/Users/alexandrupopa/.joint-expense-tracker/service-app/launchd/manual-web.err.log</string>
   <key>RunAtLoad</key>
   <true/>
+  <key>ProcessType</key>
+  <string>Interactive</string>
   <key>KeepAlive</key>
   <dict>
     <key>SuccessfulExit</key>
