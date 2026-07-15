@@ -59,6 +59,48 @@ def insert_alert(conn: sqlite3.Connection, alert: ParsedAlert) -> bool:
         return False
 
 
+def create_manual_transaction(
+    conn: sqlite3.Connection,
+    transaction_date: str,
+    merchant: str,
+    amount: float,
+    card_last4: str | None = None,
+    status: str = "Review",
+    joint_amount: float | None = None,
+    note: str | None = None,
+) -> int:
+    """Create a transaction when there is no imported message to attach to it."""
+    status = normalize_status(status)
+    card_last4 = (card_last4 or "").strip() or None
+    account_name = account_name_for(conn, card_last4)
+    computed_joint_amount = joint_amount_for_status(status, amount, joint_amount)
+    now = utc_now()
+    cursor = conn.execute(
+        """
+        INSERT INTO transactions (
+            transaction_datetime, month, amount, merchant, card_last4,
+            account_name, status, joint_amount, note, raw_text, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            f"{transaction_date}T12:00:00",
+            transaction_date[:7],
+            round(amount, 2),
+            merchant.strip(),
+            card_last4,
+            account_name,
+            status,
+            round(computed_joint_amount, 2),
+            (note or "").strip() or None,
+            "Manually added transaction",
+            now,
+            now,
+        ),
+    )
+    return int(cursor.lastrowid)
+
+
 def classify_transaction(
     transaction_id: int,
     status: str,

@@ -9,7 +9,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from joint_expense_tracker.db import get_db, init_db
 from joint_expense_tracker.models import ParsedAlert
 from joint_expense_tracker.rules import apply_rules, joint_amount_for_status, tip_amount_from_percent, tip_percent_from_amount
-from joint_expense_tracker.services import classify_transaction, dashboard_data, export_month, insert_alert, update_transaction
+from joint_expense_tracker.services import classify_transaction, create_manual_transaction, dashboard_data, export_month, insert_alert, update_transaction
 from joint_expense_tracker.web import classify
 
 
@@ -52,6 +52,33 @@ def test_status_joint_amount_logic() -> None:
     assert joint_amount_for_status("Split", 30, 99) == 30
     assert tip_amount_from_percent(80.18, 20) == 16.04
     assert tip_percent_from_amount(80.18, 16.04) == 20.0
+
+
+def test_create_manual_transaction_uses_account_and_status_amount(tmp_path: Path) -> None:
+    db_path = tmp_path / "app.sqlite"
+    init_db(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("INSERT INTO accounts (card_last4, account_name) VALUES (?, ?)", ("1234", "House Card"))
+
+    transaction_id = create_manual_transaction(
+        conn,
+        "2026-07-10",
+        "Corner Market",
+        42.50,
+        card_last4="1234",
+        status="Joint",
+        note="Entered after missed alert",
+    )
+    row = conn.execute("SELECT * FROM transactions WHERE id = ?", (transaction_id,)).fetchone()
+    conn.close()
+
+    assert row["transaction_datetime"] == "2026-07-10T12:00:00"
+    assert row["month"] == "2026-07"
+    assert row["account_name"] == "House Card"
+    assert row["status"] == "Joint"
+    assert row["joint_amount"] == 42.5
+    assert row["note"] == "Entered after missed alert"
 
 
 def test_edit_tip_amount_updates_percent_and_joint_amount(tmp_path: Path) -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 from typing import Optional
 
@@ -11,7 +12,7 @@ from fastapi.templating import Jinja2Templates
 from .config import DATA_DIR, DEFAULT_CHASE_KEYWORDS, DEFAULT_CHASE_SENDERS, STATUSES
 from .db import get_db, init_db, rows_to_dicts, set_setting, utc_now
 from .importer import diagnose_messages, import_messages
-from .services import classify_transaction, dashboard_data, export_month, update_transaction
+from .services import classify_transaction, create_manual_transaction, dashboard_data, export_month, update_transaction
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -108,9 +109,43 @@ def transactions(
             "months": [row["month"] for row in all_months],
             "accounts": accounts,
             "statuses": STATUSES,
+            "today": date.today().isoformat(),
             "filters": {"month": month or "", "status": status or "", "account": account or "", "q": q or ""},
         },
     )
+
+
+@app.post("/transactions")
+def create_transaction(
+    transaction_date: str = Form(...),
+    merchant: str = Form(...),
+    amount: str = Form(...),
+    card_last4: str = Form(""),
+    status: str = Form("Review"),
+    joint_amount: str = Form(""),
+    note: str = Form(""),
+):
+    try:
+        date.fromisoformat(transaction_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="transaction_date must be a valid date") from exc
+    if not merchant.strip():
+        raise HTTPException(status_code=422, detail="merchant is required")
+    parsed_amount = optional_float(amount, "amount")
+    if parsed_amount is None or parsed_amount <= 0:
+        raise HTTPException(status_code=422, detail="amount must be greater than zero")
+    with get_db() as conn:
+        create_manual_transaction(
+            conn,
+            transaction_date,
+            merchant,
+            parsed_amount,
+            card_last4,
+            status,
+            optional_float(joint_amount, "joint_amount"),
+            note,
+        )
+    return redirect("/transactions")
 
 
 @app.post("/transactions/{transaction_id}/classify")
