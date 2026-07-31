@@ -6,7 +6,7 @@
   <label>Card/account name <input name="account_name" value="{{ transaction.account_name or '' }}" placeholder="Chase Sapphire Preferred Visa"></label>
   <input type="hidden" name="card_last4" value="{{ transaction.card_last4 or '' }}">
   <label>Status
-    <select name="status">{% for status in statuses %}<option value="{{ status }}" {% if transaction.status == status %}selected{% endif %}>{{ status }}</option>{% endfor %}</select>
+    <select name="status">{% for status in statuses %}<option value="{{ status }}" {% if transaction.status == status %}selected{% endif %}>{{ "Present" if status == "Wife" else status }}</option>{% endfor %}</select>
   </label>
   <label>Original amount <input readonly value="${{ '%.2f'|format(transaction.amount) }}"></label>
   <label>Tip percent <input id="tip_percent" name="tip_percent" type="number" inputmode="decimal" step="0.01" min="0" max="100" value="{{ transaction.tip_percent or '' }}"></label>

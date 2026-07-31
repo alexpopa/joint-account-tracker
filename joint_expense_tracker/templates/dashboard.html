@@ -26,6 +26,14 @@
     <strong>${{ "%.2f"|format(total_venmo) }}</strong>
   </div>
   <div class="metric">
+    <span>Total personal spending</span>
+    <strong>${{ "%.2f"|format(total_personal or 0) }}</strong>
+  </div>
+  <div class="metric">
+    <span>Total present spending</span>
+    <strong>${{ "%.2f"|format(total_present or 0) }}</strong>
+  </div>
+  <div class="metric">
     <span>Needs review</span>
     <strong>{{ needs_review_count }}</strong>
   </div>
@@ -65,7 +73,7 @@
           {% else %}
             {% set status_total = row.gross %}
           {% endif %}
-          <tr><td>{{ row.status }}</td><td>{{ row.count }}</td><td class="money">${{ "%.2f"|format(status_total or 0) }}</td></tr>
+          <tr><td>{{ "Present" if row.status == "Wife" else row.status }}</td><td>{{ row.count }}</td><td class="money">${{ "%.2f"|format(status_total or 0) }}</td></tr>
           {% else %}
           <tr><td colspan="3">No status totals yet.</td></tr>
           {% endfor %}
@@ -99,6 +107,7 @@
               <input name="tip_amount" type="number" min="0" step="0.01" placeholder="Tip $">
               <button name="status" value="Joint">Joint</button>
               <button name="status" value="Personal">Personal</button>
+              <button name="status" value="Wife">Present</button>
               <button name="status" value="Her">Her</button>
             </form>
             {% for status in ["Review", "Ignored"] %}

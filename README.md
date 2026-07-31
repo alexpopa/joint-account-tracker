@@ -61,8 +61,9 @@ The diagnostic command prints whether `chat.db` exists, whether copying succeede
 2. New transactions default to `Review` unless a rule classifies them.
 3. Map card last4 values to friendly names on Accounts.
 4. Classify transactions as `Joint`, `Personal`, `Split`, `Review`, or `Ignored`.
-5. Enter a manual joint amount for `Split`.
-6. View monthly totals and export CSVs.
+5. Classify gifts, dinners, and other spending for your wife as `Wife`; it remains included in Personal totals.
+6. Enter a manual joint amount for `Split`.
+7. View monthly totals and export CSVs.
 
 ## Tests
 

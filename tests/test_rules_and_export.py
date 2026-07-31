@@ -81,6 +81,55 @@ def test_create_manual_transaction_uses_account_and_status_amount(tmp_path: Path
     assert row["note"] == "Entered after missed alert"
 
 
+def test_wife_status_is_included_in_personal_total(tmp_path: Path) -> None:
+    db_path = tmp_path / "app.sqlite"
+    init_db(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+
+    create_manual_transaction(conn, "2026-07-10", "Gift Shop", 42.50, status="Wife")
+    create_manual_transaction(conn, "2026-07-11", "Game Store", 17.50, status="Personal")
+    conn.commit()
+
+    data = dashboard_data(conn, "2026-07")
+    personal_totals = {row["status"]: row["total"] for row in data["totals_by_status"]}
+    row = conn.execute("SELECT status, joint_amount FROM transactions WHERE merchant = 'Gift Shop'").fetchone()
+    conn.close()
+
+    assert row["status"] == "Wife"
+    assert row["joint_amount"] == 0
+    assert data["total_personal"] == 60
+    assert data["total_present"] == 42.5
+    assert personal_totals == {"Personal": 17.5, "Wife": 42.5}
+
+
+def test_rules_can_classify_wife_spending(tmp_path: Path) -> None:
+    db_path = tmp_path / "app.sqlite"
+    init_db(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        """
+        INSERT INTO rules (match_text, match_field, default_status, priority, active)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        ("Wife Dinner", "merchant", "Wife", 1, 1),
+    )
+    alert = ParsedAlert(
+        amount=80,
+        merchant="Wife Dinner",
+        card_last4="1234",
+        transaction_datetime="2026-07-12T12:00:00+00:00",
+        month="2026-07",
+        raw_text="Chase alert $80.00 at Wife Dinner",
+    )
+
+    applied = apply_rules(conn, alert)
+    conn.close()
+
+    assert applied.status == "Wife"
+
+
 def test_edit_tip_amount_updates_percent_and_joint_amount(tmp_path: Path) -> None:
     db_path = tmp_path / "app.sqlite"
     init_db(db_path)

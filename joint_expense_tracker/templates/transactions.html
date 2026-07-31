@@ -20,7 +20,7 @@
       </select>
     </label>
     <label>Status
-      <select name="status">{% for status in statuses %}<option value="{{ status }}" {% if status == "Review" %}selected{% endif %}>{{ status }}</option>{% endfor %}</select>
+      <select name="status">{% for status in statuses %}<option value="{{ status }}" {% if status == "Review" %}selected{% endif %}>{{ "Present" if status == "Wife" else status }}</option>{% endfor %}</select>
     </label>
     <label>Joint amount <span class="label-hint">For Split only</span><input name="joint_amount" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Optional"></label>
     <label class="form-wide">Note <input name="note" placeholder="Optional note"></label>
@@ -29,7 +29,7 @@
 </details>
 <form class="filters" method="get" action="/transactions">
   <select name="month"><option value="">All months</option>{% for month in months %}<option value="{{ month }}" {% if filters.month == month %}selected{% endif %}>{{ month }}</option>{% endfor %}</select>
-  <select name="status"><option value="">Visible statuses</option>{% for status in statuses %}<option value="{{ status }}" {% if filters.status == status %}selected{% endif %}>{{ status }}</option>{% endfor %}</select>
+  <select name="status"><option value="">Visible statuses</option>{% for status in statuses %}<option value="{{ status }}" {% if filters.status == status %}selected{% endif %}>{{ "Present" if status == "Wife" else status }}</option>{% endfor %}</select>
   <select name="account"><option value="">All accounts</option>{% for acct in accounts %}<option value="{{ acct.card_last4 }}" {% if filters.account == acct.card_last4 %}selected{% endif %}>{{ acct.account_name }}</option>{% endfor %}</select>
   <input name="q" value="{{ filters.q }}" placeholder="Search merchant/raw text">
   <button>Filter</button>
@@ -51,7 +51,7 @@
           {% endif %}
         </td>
         <td>{{ tx.account_name or tx.card_last4 or "Unknown" }}</td>
-        <td><span class="pill">{{ tx.status }}</span></td>
+        <td><span class="pill">{{ "Present" if tx.status == "Wife" else tx.status }}</span></td>
         <td class="money">${{ "%.2f"|format(tx.joint_amount) }}</td>
         <td>{{ tx.note or "" }}</td>
         <td class="row-actions">
@@ -60,6 +60,7 @@
             <input name="tip_amount" type="number" min="0" step="0.01" placeholder="Tip $">
             <button name="status" value="Joint">Joint</button>
             <button name="status" value="Personal">Personal</button>
+            <button name="status" value="Wife">Present</button>
             <button name="status" value="Her">Her</button>
           </form>
           {% for status in ["Review", "Ignored"] %}

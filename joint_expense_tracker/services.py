@@ -242,11 +242,21 @@ def dashboard_data(conn: sqlite3.Connection, month: str | None = None) -> dict[s
         "SELECT ROUND(COALESCE(SUM(joint_amount), 0), 2) AS total FROM transactions WHERE month = ? AND status = 'Her'",
         params,
     ).fetchone()["total"]
+    total_personal = conn.execute(
+        "SELECT ROUND(COALESCE(SUM(amount), 0), 2) AS total FROM transactions WHERE month = ? AND status IN ('Personal', 'Wife')",
+        params,
+    ).fetchone()["total"]
+    total_present = conn.execute(
+        "SELECT ROUND(COALESCE(SUM(amount), 0), 2) AS total FROM transactions WHERE month = ? AND status = 'Wife'",
+        params,
+    ).fetchone()["total"]
     return {
         "months": all_months,
         "selected_month": selected,
         "total_joint": total_joint or 0,
         "total_venmo": total_venmo or 0,
+        "total_personal": total_personal or 0,
+        "total_present": total_present or 0,
         "totals_by_account": totals_by_account,
         "totals_by_status": totals_by_status,
         "needs_review": review,
@@ -301,11 +311,14 @@ def export_month(month: str, db_path: Path = DB_PATH, export_dir: Path = EXPORT_
             writer.writerow(["Metric", "Label", "Value"])
             writer.writerow(["total_joint_reimbursement", month, data["total_joint"]])
             writer.writerow(["total_venmo_request", month, data["total_venmo"]])
+            writer.writerow(["total_personal_spending", month, data["total_personal"]])
             for row in data["totals_by_account"]:
                 writer.writerow(["total_by_account", row["label"], row["total"]])
             for row in data["totals_by_status"]:
                 if row["status"] == "Her":
                     writer.writerow(["total_by_status", row["status"], row["venmo_total"]])
-                else:
+                elif row["status"] in {"Joint", "Split"}:
                     writer.writerow(["total_by_status", row["status"], row["joint_total"]])
+                else:
+                    writer.writerow(["total_by_status", row["status"], row["total"]])
     return transaction_path, summary_path
