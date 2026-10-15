@@ -80,3 +80,7 @@ Personal rules can assign subcategories to new imports. Existing Personal rules 
 ### Monthly trends
 
 Open Trends to compare transaction counts and tracked amounts for every status by month. The default range covers twelve months through the latest transaction; choose From and To to change it. Missing months show zero transactions. Joint, Split, and Her use joint amounts; other statuses use original purchase amounts. Expand monthly detail for the underlying values.
+
+### Venmo display label
+
+The dashboard, transaction screens, and Trends display the stored `Her` status as Venmo. Existing records, form values, rules, and CSV exports retain `Her`; reimbursement calculations are unchanged.

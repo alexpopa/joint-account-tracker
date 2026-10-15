@@ -24,18 +24,18 @@
       <div class="status-card-title">
         <span class="status-dot" aria-hidden="true"></span>
         <div>
-          <h2>{{ status.label }}</h2>
+          <h2>{{ "Venmo" if status.key == "Her" else status.label }}</h2>
           <p>Monthly transactions</p>
         </div>
       </div>
-      <div class="status-summary" aria-label="{{ status.label }} totals for {{ range_label }}">
+      <div class="status-summary" aria-label="{{ "Venmo" if status.key == "Her" else status.label }} totals for {{ range_label }}">
         <strong>{{ status.total_count }}</strong><span>transactions</span>
         <strong>${{ "%.2f"|format(status.total_amount) }}</strong><span>tracked</span>
       </div>
     </div>
     <div class="status-chart-viewport">
-      <svg class="status-chart" data-status-key="{{ status.key }}" role="img" aria-label="{{ status.label }} transaction count by month from {{ range_label }}"></svg>
-      <p class="chart-empty" hidden>No {{ (status.label)|lower }} transactions in this range.</p>
+      <svg class="status-chart" data-status-key="{{ status.key }}" role="img" aria-label="{{ "Venmo" if status.key == "Her" else status.label }} transaction count by month from {{ range_label }}"></svg>
+      <p class="chart-empty" hidden>No {{ ("Venmo" if status.key == "Her" else status.label)|lower }} transactions in this range.</p>
     </div>
   </article>
   {% endfor %}
@@ -48,7 +48,7 @@
       <thead>
         <tr>
           <th>Month</th>
-          {% for status in series %}<th>{{ status.label }}</th>{% endfor %}
+          {% for status in series %}<th>{{ "Venmo" if status.key == "Her" else status.label }}</th>{% endfor %}
         </tr>
       </thead>
       <tbody>
@@ -106,7 +106,7 @@
   function drawStatusChart(svg, statusKey) {
     const item = chartData.series.find((series) => series.key === statusKey);
     if (!item) return;
-    const displayLabel = item.label;
+    const displayLabel = statusKey === "Her" ? "Venmo" : item.label;
     const emptyMessage = svg.parentElement.querySelector(".chart-empty");
     const months = chartData.months;
     const values = item.counts;
