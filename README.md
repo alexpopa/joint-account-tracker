@@ -101,12 +101,11 @@ Time Machine also covers this folder if it's enabled.
 | Split | Partly shared purchases | Joint (the part you enter), Personal (the rest) |
 | Venmo | Your wife used your card for herself | Venmo request (amount + tip) |
 | Personal | Your own spending | Personal spending |
-| Present | Gifts and treats for your wife | Personal spending, also shown on its own |
 | Review | Not decided yet (default for new imports) | Nothing |
 | Ignored | Card payments, deposits, refunds, noise | Nothing; hidden by default |
 
-Venmo and Present are stored internally as `Her` and `Wife`. Those names appear in CSV
-exports.
+**Presents** are Personal spending with the category **Present**. The Present button
+sets both in one click, and the Dashboard shows the Present total on its own.
 
 ## Categories
 
@@ -122,7 +121,7 @@ For any month, Spending shows:
 
 - the joint, personal, and Venmo totals, with the change from the previous month,
 - the joint vs. personal split,
-- joint and personal spending broken down by category (Present is its own line),
+- joint and personal spending broken down by category (including Present),
 - a single 12-month chart of joint vs. personal spending. Click a category to see just its trend.
 
 ## Workflow

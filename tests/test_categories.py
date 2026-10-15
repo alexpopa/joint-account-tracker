@@ -29,7 +29,7 @@ def test_categories_apply_to_joint_split_and_personal_only(conn) -> None:
     for status in ("Joint", "Split", "Personal"):
         tx = create_manual_transaction(conn, "2026-09-09", "Store", 10, status=status, category="Groceries")
         assert category_of(conn, tx) == "Groceries", status
-    for status in ("Wife", "Her", "Review", "Ignored"):
+    for status in ("Venmo", "Review", "Ignored"):
         tx = create_manual_transaction(conn, "2026-09-09", "Store", 10, status=status, category="Groceries")
         assert category_of(conn, tx) is None, status
 
@@ -47,7 +47,7 @@ def test_quick_classify_keeps_sets_or_clears_category(conn) -> None:
     assert category_of(conn, tx) is None
 
     classify_transaction(conn, tx, "Personal", category="Dining")
-    classify_transaction(conn, tx, "Wife")
+    classify_transaction(conn, tx, "Venmo")
     assert category_of(conn, tx) is None
 
 
@@ -80,3 +80,15 @@ def test_delete_category_clears_transactions_and_rules(conn) -> None:
     assert "Video games" not in categories(conn)
     assert category_of(conn, tx) is None
     assert conn.execute("SELECT default_subcategory FROM rules").fetchone()[0] is None
+
+
+def test_present_is_a_personal_category_shortcut(conn) -> None:
+    gift = create_manual_transaction(conn, "2026-09-09", "Flowers", 40, status="Present")
+    review = create_manual_transaction(conn, "2026-09-09", "Card shop", 8)
+    classify_transaction(conn, review, "Present", category="Groceries")
+
+    for tx in (gift, review):
+        assert tuple(conn.execute("SELECT status, subcategory FROM transactions WHERE id = ?", (tx,)).fetchone()) == (
+            "Personal",
+            "Present",
+        )

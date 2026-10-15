@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from .config import DB_PATH, EXPORT_DIR, STATUSES, ensure_data_dirs, status_label
+from .config import DB_PATH, EXPORT_DIR, PRESENT, STATUSES, ensure_data_dirs
 from .db import current_month, get_db, rows_to_dicts, save_category, utc_now
 from .models import ParsedAlert
 from .parser import extract_account_name
@@ -19,17 +19,23 @@ from .rules import (
 )
 
 UNCATEGORIZED = "Uncategorized"
-PRESENT = status_label("Wife")
 REFUND_WINDOW_DAYS = 60
 
-# How much of a transaction is joint vs. the owner's own spending. Venmo ("Her") is neither:
+# How much of a transaction is joint vs. the owner's own spending. Venmo is neither:
 # it's paid back by the partner. Personal spending includes tips and the non-joint part of a Split.
 JOINT_SPEND_SQL = "CASE WHEN status IN ('Joint', 'Split') THEN joint_amount ELSE 0 END"
 PERSONAL_SPEND_SQL = """CASE
-    WHEN status IN ('Personal', 'Wife') THEN amount + tip_amount
+    WHEN status = 'Personal' THEN amount + tip_amount
     WHEN status = 'Split' THEN MAX(amount + tip_amount - joint_amount, 0)
     ELSE 0 END"""
-SPENDING_STATUSES_SQL = "('Joint', 'Split', 'Personal', 'Wife')"
+SPENDING_STATUSES_SQL = "('Joint', 'Split', 'Personal')"
+
+
+def resolve_status(status: str, category: str | None) -> tuple[str, str | None]:
+    """Expand the "Present" shortcut to Personal + the Present category; validate everything else."""
+    if status == PRESENT:
+        return "Personal", PRESENT
+    return normalize_status(status), category
 
 
 def account_name_for(conn: sqlite3.Connection, card_last4: str | None) -> str | None:
@@ -140,7 +146,7 @@ def pair_refund(conn: sqlite3.Connection, credit_id: int) -> int | None:
     else:
         credit_status = "Review"
         credit_note = (
-            f"Possible refund of the {status_label(purchase['status'])} purchase on {purchase_date}. "
+            f"Possible refund of the {purchase['status']} purchase on {purchase_date}. "
             "If so, Ignore both."
         )
     conn.execute(
@@ -162,7 +168,7 @@ def create_manual_transaction(
     category: str | None = None,
 ) -> int:
     """Create a transaction when there is no imported message to attach to it."""
-    status = normalize_status(status)
+    status, category = resolve_status(status, category)
     card_last4 = (card_last4 or "").strip() or None
     account_name = account_name_for(conn, card_last4)
     computed_joint_amount = joint_amount_for_status(status, amount, joint_amount)
@@ -208,7 +214,7 @@ def classify_transaction(
     `category=None` keeps the current category (if the new status carries one);
     an empty string clears it.
     """
-    status = normalize_status(status)
+    status, category = resolve_status(status, category)
     row = conn.execute("SELECT amount, subcategory FROM transactions WHERE id = ?", (transaction_id,)).fetchone()
     if not row:
         return
@@ -253,7 +259,7 @@ def _tip_values_from_edit(amount: float, data: dict[str, Any]) -> tuple[float | 
 
 
 def update_transaction(conn: sqlite3.Connection, transaction_id: int, data: dict[str, Any]) -> None:
-    status = normalize_status(str(data.get("status", "Review")))
+    status, category = resolve_status(str(data.get("status", "Review")), data.get("category"))
     current = conn.execute(
         "SELECT amount, account_name, raw_text, subcategory FROM transactions WHERE id = ?", (transaction_id,)
     ).fetchone()
@@ -284,7 +290,7 @@ def update_transaction(conn: sqlite3.Connection, transaction_id: int, data: dict
             round(tip_amount, 2),
             data.get("note") or None,
             utc_now(),
-            save_category(conn, status, data.get("category", current["subcategory"])),
+            save_category(conn, status, current["subcategory"] if category is None else category),
             transaction_id,
         ),
     )
@@ -344,7 +350,7 @@ def dashboard_data(conn: sqlite3.Connection, month: str | None = None) -> dict[s
         conn.execute(
             """
             SELECT status, COUNT(*) AS count,
-                   ROUND(SUM(CASE WHEN status IN ('Joint', 'Split', 'Her') THEN joint_amount ELSE amount + tip_amount END), 2) AS total
+                   ROUND(SUM(CASE WHEN status IN ('Joint', 'Split', 'Venmo') THEN joint_amount ELSE amount + tip_amount END), 2) AS total
             FROM transactions
             WHERE month = ? AND status != 'Ignored'
             GROUP BY status
@@ -371,13 +377,13 @@ def dashboard_data(conn: sqlite3.Connection, month: str | None = None) -> dict[s
     totals = conn.execute(
         f"""
         SELECT ROUND(COALESCE(SUM({JOINT_SPEND_SQL}), 0), 2) AS joint,
-               ROUND(COALESCE(SUM(CASE WHEN status = 'Her' THEN joint_amount ELSE 0 END), 0), 2) AS venmo,
+               ROUND(COALESCE(SUM(CASE WHEN status = 'Venmo' THEN joint_amount ELSE 0 END), 0), 2) AS venmo,
                ROUND(COALESCE(SUM({PERSONAL_SPEND_SQL}), 0), 2) AS personal,
-               ROUND(COALESCE(SUM(CASE WHEN status = 'Wife' THEN amount + tip_amount ELSE 0 END), 0), 2) AS present
+               ROUND(COALESCE(SUM(CASE WHEN status = 'Personal' AND subcategory = ? COLLATE NOCASE THEN amount + tip_amount ELSE 0 END), 0), 2) AS present
         FROM transactions
         WHERE month = ?
         """,
-        params,
+        (PRESENT, *params),
     ).fetchone()
     return {
         "months": all_months,
@@ -415,8 +421,8 @@ def spending_data(
 ) -> dict[str, Any]:
     """Where the money went in one month, plus a joint-vs-personal trend ending that month.
 
-    Personal categories come from Personal and Split rows; Present purchases appear as
-    their own "Present" line. With `category`, the trend is limited to that category.
+    Categories come from Joint, Split, and Personal rows (presents are the Personal
+    "Present" category). With `category`, the trend is limited to that category.
     """
     all_months = months(conn)
     selected = normalize_month(month) or (all_months[0] if all_months else current_month())
@@ -427,14 +433,14 @@ def spending_data(
     rows = conn.execute(
         f"""
         SELECT month,
-               CASE WHEN status = 'Wife' THEN ? ELSE COALESCE(subcategory, ?) END AS category,
+               COALESCE(subcategory, ?) AS category,
                SUM({JOINT_SPEND_SQL}) AS joint,
                SUM({PERSONAL_SPEND_SQL}) AS personal
         FROM transactions
         WHERE month BETWEEN ? AND ? AND status IN {SPENDING_STATUSES_SQL}
         GROUP BY 1, 2
         """,
-        (PRESENT, UNCATEGORIZED, start, selected),
+        (UNCATEGORIZED, start, selected),
     ).fetchall()
 
     joint_by_category: dict[str, float] = {}
@@ -454,7 +460,7 @@ def spending_data(
 
     venmo = conn.execute(
         "SELECT month, ROUND(SUM(joint_amount), 2) AS total FROM transactions "
-        "WHERE status = 'Her' AND month IN (?, ?) GROUP BY month",
+        "WHERE status = 'Venmo' AND month IN (?, ?) GROUP BY month",
         (selected, previous),
     ).fetchall()
     venmo_by_month = {row["month"]: float(row["total"] or 0) for row in venmo}

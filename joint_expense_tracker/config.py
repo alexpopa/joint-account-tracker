@@ -21,10 +21,10 @@ APP_TIMEZONE = ZoneInfo("America/New_York")
 DEFAULT_CHASE_SENDERS = ["24273", "28107", "33172", "72166", "74869"]
 DEFAULT_CHASE_KEYWORDS = ["Chase", "purchase", "card", "ending", "was charged", "alert"]
 
-# Stored status values. Do not rename them: rows, rules, and CSV exports depend on them.
-STATUSES = ["Joint", "Personal", "Wife", "Her", "Split", "Review", "Ignored"]
-# Display names for stored values that differ from what the UI shows.
-STATUS_LABELS = {"Her": "Venmo", "Wife": "Present"}
+STATUSES = ["Joint", "Personal", "Venmo", "Split", "Review", "Ignored"]
+# Presents for the partner are Personal spending with this category. "Present" is also
+# accepted as a status shortcut and stored as Personal + Present (see services.resolve_status).
+PRESENT = "Present"
 # Statuses whose spending can carry a category (stored in the `subcategory` column).
 CATEGORIZED_STATUSES = {"Joint", "Split", "Personal"}
 STARTER_CATEGORIES = [
@@ -33,6 +33,7 @@ STARTER_CATEGORIES = [
     "Groceries",
     "Health",
     "Household",
+    "Present",
     "Shopping",
     "Subscriptions",
     "Transport",
@@ -40,10 +41,6 @@ STARTER_CATEGORIES = [
     "Utilities",
     "Video games",
 ]
-
-
-def status_label(status: str | None) -> str:
-    return STATUS_LABELS.get(status or "", status or "")
 
 
 def ensure_data_dirs() -> None:

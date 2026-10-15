@@ -29,11 +29,14 @@ CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE personal_subcategories (name TEXT PRIMARY KEY COLLATE NOCASE);
 INSERT INTO personal_subcategories VALUES ('Food'), ('Video games');
 INSERT INTO settings VALUES ('polling_interval', 'manual');
-INSERT INTO rules (match_text, default_status) VALUES ('Sample Grocery', 'Joint'), ('Steam', 'Personal');
+INSERT INTO rules (match_text, default_status)
+VALUES ('Sample Grocery', 'Joint'), ('Steam', 'Personal'), ('Zara', 'Her'), ('Florist', 'Wife');
 -- 9:30 PM Eastern on Sep 30, stored in UTC and bucketed into October by the old code.
 INSERT INTO transactions (source_message_id, source_guid, transaction_datetime, month, amount, merchant, status, raw_text)
 VALUES ('101', 'guid-a', '2026-10-01T01:30:00+00:00', '2026-10', 50, 'Late Dinner', 'Joint', 'raw'),
-       ('102', 'guid-b', '2026-09-15T16:00:00+00:00', '2026-09', 20, 'Lunch', 'Personal', 'raw');
+       ('102', 'guid-b', '2026-09-15T16:00:00+00:00', '2026-09', 20, 'Lunch', 'Personal', 'raw'),
+       ('103', 'guid-c', '2026-09-16T16:00:00+00:00', '2026-09', 30, 'Zara', 'Her', 'raw'),
+       ('104', 'guid-d', '2026-09-17T16:00:00+00:00', '2026-09', 40, 'Florist', 'Wife', 'raw');
 INSERT INTO transactions (transaction_datetime, month, amount, merchant, status, raw_text)
 VALUES ('2026-09-30T12:00:00', '2026-09', 5, 'Manual', 'Review', 'Manually added transaction');
 """
@@ -71,7 +74,10 @@ def test_legacy_database_is_migrated_once(tmp_path) -> None:
         assert rows["Lunch"]["month"] == "2026-09"
         assert rows["Manual"]["transaction_datetime"] == "2026-09-30T12:00:00"
         assert rows["Late Dinner"]["tip_amount"] == 0 and rows["Late Dinner"]["subcategory"] is None
-        assert [r["match_text"] for r in conn.execute("SELECT match_text FROM rules")] == ["Steam"]
+        assert (rows["Zara"]["status"], rows["Zara"]["subcategory"]) == ("Venmo", None)
+        assert (rows["Florist"]["status"], rows["Florist"]["subcategory"]) == ("Personal", "Present")
+        rules = [tuple(r) for r in conn.execute("SELECT match_text, default_status, default_subcategory FROM rules")]
+        assert rules == [("Steam", "Personal", None), ("Zara", "Venmo", None), ("Florist", "Personal", "Present")]
         assert conn.execute("SELECT COUNT(*) FROM settings WHERE key = 'polling_interval'").fetchone()[0] == 0
         names = [r["name"] for r in conn.execute("SELECT name FROM personal_subcategories")]
         assert "Food" not in names and "Groceries" in names

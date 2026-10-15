@@ -18,16 +18,15 @@ from .config import (
     DEFAULT_CHASE_KEYWORDS,
     DEFAULT_CHASE_SENDERS,
     STATUSES,
-    status_label,
 )
 from .db import categories, delete_category, get_db, init_db, rows_to_dicts, save_category, set_setting, utc_now
 from .importer import diagnose_messages, import_messages
-from .rules import normalize_status
 from .services import (
     classify_transaction,
     create_manual_transaction,
     dashboard_data,
     export_month,
+    resolve_status,
     spending_data,
     update_transaction,
 )
@@ -45,7 +44,6 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="Joint Expense Tracker", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
-templates.env.filters["status_label"] = status_label
 templates.env.filters["money"] = lambda value: f"${float(value or 0):,.2f}"
 templates.env.globals["categorized_statuses"] = sorted(CATEGORIZED_STATUSES)
 
@@ -325,7 +323,7 @@ def save_rule(
     priority: int = Form(100),
     active: int = Form(1),
 ):
-    default_status = normalize_status(default_status)
+    default_status, category = resolve_status(default_status, category)
     with get_db() as conn:
         conn.execute(
             """

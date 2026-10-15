@@ -4,7 +4,7 @@
 <form class="manual-form rule-create" method="post">
   <label>Match text <input name="match_text" placeholder="e.g. Steam" required></label>
   <label>Match in <select name="match_field"><option value="merchant_or_raw">Merchant or raw</option><option value="merchant">Merchant</option><option value="raw">Raw text</option></select></label>
-  <label>Status <select name="default_status">{% for status in statuses %}<option value="{{ status }}">{{ status|status_label }}</option>{% endfor %}</select></label>
+  <label>Status <select name="default_status">{% for status in statuses %}<option value="{{ status }}">{{ status }}</option>{% endfor %}</select></label>
   {% include "category_input.html" %}
   <label>Split fraction <input name="default_joint_percent" type="number" step="0.01" min="0" max="1" placeholder="e.g. 0.5 for half"></label>
   <label>Split amount <input name="default_joint_amount" type="number" step="0.01" min="0" placeholder="Optional"></label>
@@ -18,7 +18,7 @@
   <tr>
     <td>{{ rule.match_text }}</td>
     <td>{{ rule.match_field }}</td>
-    <td>{{ rule.default_status|status_label }}</td>
+    <td>{{ rule.default_status }}</td>
     <td>{% if rule.default_status in categorized_statuses %}<form method="post" action="/rules/{{ rule.id }}/category" class="category-rule-form">{% with category_value=rule.default_subcategory or "", compact=True %}{% include "category_input.html" %}{% endwith %}<button>Save</button></form>{% else %}—{% endif %}</td>
     <td>{{ rule.default_joint_percent or rule.default_joint_amount or "" }}</td>
     <td>{{ rule.priority }}</td>

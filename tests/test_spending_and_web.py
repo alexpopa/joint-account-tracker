@@ -10,8 +10,8 @@ def seed_month(conn) -> None:
     create_manual_transaction(conn, "2026-09-04", "Electric", 80, status="Joint", category="Utilities")
     create_manual_transaction(conn, "2026-09-05", "Steam", 60, status="Personal", category="Video games")
     create_manual_transaction(conn, "2026-09-06", "Bodega", 15, status="Personal")
-    create_manual_transaction(conn, "2026-09-07", "Flowers", 40, status="Wife")
-    create_manual_transaction(conn, "2026-09-08", "Her shoes", 90, status="Her")
+    create_manual_transaction(conn, "2026-09-07", "Flowers", 40, status="Present")
+    create_manual_transaction(conn, "2026-09-08", "Her shoes", 90, status="Venmo")
     create_manual_transaction(conn, "2026-09-09", "Dinner", 100, status="Split", joint_amount=70, category="Dining")
     create_manual_transaction(conn, "2026-09-10", "Unreviewed", 999, status="Review")
     create_manual_transaction(conn, "2026-08-03", "Trader Joe's", 100, status="Joint", category="Groceries")
@@ -71,11 +71,11 @@ def test_pages_use_display_labels(client) -> None:
 
     with get_db(config.DB_PATH) as conn:
         seed_month(conn)
-        conn.execute("INSERT INTO rules (match_text, default_status) VALUES ('Zara', 'Her')")
+        conn.execute("INSERT INTO rules (match_text, default_status) VALUES ('Zara', 'Venmo')")
 
     dashboard = client.get("/?month=2026-09").text
     assert "Venmo" in dashboard and "Present" in dashboard
-    assert "<td>Her</td>" not in dashboard and "<td>Wife</td>" not in dashboard
+    assert "Her</td>" not in dashboard and "Wife" not in dashboard
     assert "<td>Venmo</td>" in client.get("/rules").text
 
     spending = client.get("/spending?month=2026-09").text

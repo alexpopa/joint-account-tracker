@@ -16,6 +16,7 @@ from .config import (
     DEFAULT_CHASE_KEYWORDS,
     DEFAULT_CHASE_SENDERS,
     DEFAULT_MESSAGES_DB,
+    PRESENT,
     STARTER_CATEGORIES,
     ensure_data_dirs,
 )
@@ -253,12 +254,25 @@ def _migration_dedupe_by_guid(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE transactions_rebuild RENAME TO transactions")
 
 
+def _migration_plain_status_names(conn: sqlite3.Connection) -> None:
+    """Store statuses as the UI names them: Her -> Venmo, and Wife -> Personal with the Present category."""
+    conn.execute("INSERT OR IGNORE INTO personal_subcategories (name) VALUES (?)", (PRESENT,))
+    conn.execute("UPDATE transactions SET status = 'Venmo' WHERE status = 'Her'")
+    conn.execute("UPDATE transactions SET status = 'Personal', subcategory = ? WHERE status = 'Wife'", (PRESENT,))
+    conn.execute("UPDATE rules SET default_status = 'Venmo' WHERE default_status = 'Her'")
+    conn.execute(
+        "UPDATE rules SET default_status = 'Personal', default_subcategory = ? WHERE default_status = 'Wife'",
+        (PRESENT,),
+    )
+
+
 # Each migration runs once, in order; PRAGMA user_version records how many have run.
 # Append new migrations to the end. Never edit or reorder ones that have shipped.
 MIGRATIONS = [
     _migration_cleanup_defaults,
     _migration_local_time,
     _migration_dedupe_by_guid,
+    _migration_plain_status_names,
 ]
 
 

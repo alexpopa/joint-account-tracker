@@ -24,7 +24,7 @@ def joint_amount_for_status(
     joint_amount: float | None = None,
     tip_amount: float = 0.0,
 ) -> float:
-    if status in {"Joint", "Her"}:
+    if status in {"Joint", "Venmo"}:
         return amount + max(0.0, tip_amount)
     if status == "Split":
         return max(0.0, min(amount, float(joint_amount or 0.0)))
@@ -56,7 +56,7 @@ def apply_rules(conn: sqlite3.Connection, alert: ParsedAlert) -> ParsedAlert:
             status = normalize_status(str(row["default_status"]))
             alert.status = status
             alert.subcategory = row["default_subcategory"] if status in CATEGORIZED_STATUSES else None
-            if status in {"Joint", "Her"}:
+            if status in {"Joint", "Venmo"}:
                 alert.joint_amount = alert.amount
             elif status == "Split":
                 if row["default_joint_amount"] is not None:

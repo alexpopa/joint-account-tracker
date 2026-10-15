@@ -6,7 +6,7 @@
   <label>Card/account name <input name="account_name" value="{{ transaction.account_name or '' }}" placeholder="Chase Sapphire Preferred Visa"></label>
   <input type="hidden" name="card_last4" value="{{ transaction.card_last4 or '' }}">
   <label>Status
-    <select name="status">{% for status in statuses %}<option value="{{ status }}" {% if transaction.status == status %}selected{% endif %}>{{ status|status_label }}</option>{% endfor %}</select>
+    <select name="status">{% for status in statuses %}<option value="{{ status }}" {% if transaction.status == status %}selected{% endif %}>{{ status }}</option>{% endfor %}</select>
   </label>
   {% set category_value = transaction.subcategory or '' %}
   {% include "category_input.html" %}
@@ -36,7 +36,7 @@
 
   function updateJointTotalForCurrentStatus() {
     const tip = Number(tipAmount.value || "0");
-    if (status.value === "Joint" || status.value === "Her") {
+    if (status.value === "Joint" || status.value === "Venmo") {
       jointAmount.value = money(amount + tip);
     }
   }
@@ -59,7 +59,7 @@
   });
 
   status.addEventListener("change", () => {
-    if (status.value === "Joint" || status.value === "Her") {
+    if (status.value === "Joint" || status.value === "Venmo") {
       updateJointTotalForCurrentStatus();
     }
   });

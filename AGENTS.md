@@ -19,28 +19,30 @@ high-risk: add or update a test for it.
 
 ## Statuses and money semantics
 
-Statuses are stored as plain strings in `transactions.status`. Two stored values
-have different display labels. **Do not rename the stored values**: rows, rules,
-form values, and CSV exports depend on them. The mapping lives in
-`config.STATUS_LABELS`; templates use the `status_label` Jinja filter.
+Statuses are stored as plain strings in `transactions.status`, and the UI shows
+them exactly as stored (`config.STATUSES`). Old databases used `Her` and `Wife`;
+migration 4 converted them.
 
-| Stored | UI label | Meaning | `joint_amount` | Counts as |
-|---|---|---|---|---|
-| `Joint` | Joint | Shared expense; reimburse from joint account | `amount + tip_amount` | joint spending |
-| `Split` | Split | Partly shared | user-entered, clamped `0..amount` | joint part → joint; rest (incl. tip) → personal |
-| `Her` | Venmo | Partner used the owner's card for herself | `amount + tip_amount` | neither; it's paid back |
-| `Personal` | Personal | Owner's own spending | `0` | personal (`amount + tip_amount`) |
-| `Wife` | Present | Gifts/treats for the partner, a slice of personal | `0` | personal, also shown as its own "Present" line |
-| `Review` | Review | Default for new imports | `0` | nothing |
-| `Ignored` | Ignored | Card payments, deposits, refunds, noise | `0` | nothing |
+| Status | Meaning | `joint_amount` | Counts as |
+|---|---|---|---|
+| `Joint` | Shared expense; reimburse from joint account | `amount + tip_amount` | joint spending |
+| `Split` | Partly shared | user-entered, clamped `0..amount` | joint part → joint; rest (incl. tip) → personal |
+| `Venmo` | Partner used the owner's card for herself | `amount + tip_amount` | neither; it's paid back |
+| `Personal` | Owner's own spending | `0` | personal (`amount + tip_amount`) |
+| `Review` | Default for new imports | `0` | nothing |
+| `Ignored` | Card payments, deposits, refunds, noise | `0` | nothing |
+
+**Presents** for the partner are `Personal` with the category `Present`
+(`config.PRESENT`). "Present" is accepted as a status shortcut (the quick button,
+rules) and stored as Personal + Present by `services.resolve_status`.
 
 The per-row math is `rules.joint_amount_for_status`. Totals are defined once as SQL
 fragments in `services.py` (`JOINT_SPEND_SQL`, `PERSONAL_SPEND_SQL`):
 
 - Joint reimbursement = Σ `joint_amount` for `Joint` + `Split`
-- Venmo request = Σ `joint_amount` for `Her`
-- Personal spending = Σ `amount + tip_amount` for `Personal` + `Wife`, plus the non-joint part of `Split`
-- Present spending = Σ `amount + tip_amount` for `Wife`
+- Venmo request = Σ `joint_amount` for `Venmo`
+- Personal spending = Σ `amount + tip_amount` for `Personal`, plus the non-joint part of `Split`
+- Present spending = Σ `amount + tip_amount` for `Personal` with category `Present`
 
 ## Categories
 
@@ -58,8 +60,8 @@ For historical reasons the storage names still say "subcategory". Code and UI sa
 | a rule's category | `rules.default_subcategory` |
 | the list of category names | table `personal_subcategories` (case-insensitive) |
 
-The Spending page (`services.spending_data`) shows "Present" as a personal
-category for all `Wife` rows, and "Uncategorized" for rows without one.
+The Spending page (`services.spending_data`) groups by category and shows
+"Uncategorized" for rows without one.
 
 ## Code map
 

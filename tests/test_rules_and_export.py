@@ -96,8 +96,8 @@ def test_quick_joint_allows_blank_tip_percent(monkeypatch) -> None:
 def test_status_joint_amount_logic() -> None:
     assert joint_amount_for_status("Joint", 30) == 30
     assert joint_amount_for_status("Joint", 30, tip_amount=6) == 36
-    assert joint_amount_for_status("Her", 30) == 30
-    assert joint_amount_for_status("Her", 30, tip_amount=6) == 36
+    assert joint_amount_for_status("Venmo", 30) == 30
+    assert joint_amount_for_status("Venmo", 30, tip_amount=6) == 36
     assert joint_amount_for_status("Personal", 30) == 0
     assert joint_amount_for_status("Ignored", 30) == 0
     assert joint_amount_for_status("Split", 30, 12.5) == 12.5
@@ -123,7 +123,7 @@ def test_create_manual_transaction_uses_account_and_status_amount(conn) -> None:
 
 
 def test_wife_status_is_included_in_personal_total(conn) -> None:
-    gift = create_manual_transaction(conn, "2026-07-10", "Gift Shop", 42.50, status="Wife")
+    gift = create_manual_transaction(conn, "2026-07-10", "Gift Shop", 42.50, status="Present")
     create_manual_transaction(conn, "2026-07-11", "Game Store", 17.50, status="Personal")
 
     data = dashboard_data(conn, "2026-07")
@@ -132,7 +132,7 @@ def test_wife_status_is_included_in_personal_total(conn) -> None:
     assert row(conn, gift)["joint_amount"] == 0
     assert data["total_personal"] == 60
     assert data["total_present"] == 42.5
-    assert totals == {"Personal": 17.5, "Wife": 42.5}
+    assert totals == {"Personal": 60.0}
 
 
 def test_personal_total_includes_tips_and_the_personal_part_of_splits(conn) -> None:
@@ -148,12 +148,13 @@ def test_personal_total_includes_tips_and_the_personal_part_of_splits(conn) -> N
 
 
 def test_rules_can_classify_wife_spending(conn) -> None:
-    add_rule(conn, "Wife Dinner", "Wife")
+    add_rule(conn, "Wife Dinner", "Personal", "Present")
     alert = ParsedAlert(
         80, "Wife Dinner", "1234", "2026-07-12T12:00:00-04:00", "2026-07", "Chase alert $80.00 at Wife Dinner"
     )
 
-    assert apply_rules(conn, alert).status == "Wife"
+    applied = apply_rules(conn, alert)
+    assert (applied.status, applied.subcategory) == ("Personal", "Present")
 
 
 def test_rules_do_not_override_ignored_credits(conn) -> None:
@@ -197,9 +198,9 @@ def test_quick_personal_saves_tip_amount_without_joint_amount(conn) -> None:
 
 def test_quick_her_saves_venmo_amount_with_tip(conn) -> None:
     tx_id = add_transaction(conn, 50)
-    classify_transaction(conn, tx_id, "Her", tip_amount=10)
+    classify_transaction(conn, tx_id, "Venmo", tip_amount=10)
     tx = row(conn, tx_id)
-    assert (tx["status"], tx["tip_amount"], tx["tip_percent"], tx["joint_amount"]) == ("Her", 10, 20.0, 60)
+    assert (tx["status"], tx["tip_amount"], tx["tip_percent"], tx["joint_amount"]) == ("Venmo", 10, 20.0, 60)
 
 
 def test_edit_tip_does_not_force_joint_status(conn) -> None:
@@ -249,17 +250,17 @@ def test_dashboard_status_totals_mix_reimbursement_and_transaction_amounts(conn)
     add_transaction(conn, 25, "Personal")
     add_transaction(conn, 40, "Review")
     add_transaction(conn, 15, "Ignored")
-    add_transaction(conn, 70, "Her", 82)
+    add_transaction(conn, 70, "Venmo", 82)
 
     totals = {r["status"]: r["total"] for r in dashboard_data(conn, "2026-05")["totals_by_status"]}
 
-    assert totals == {"Her": 82.0, "Joint": 111.63, "Personal": 25.0, "Review": 40.0}
+    assert totals == {"Venmo": 82.0, "Joint": 111.63, "Personal": 25.0, "Review": 40.0}
 
 
 def test_dashboard_separates_joint_and_venmo_totals(conn) -> None:
     add_transaction(conn, 100, "Joint", 120, account_name="Card A")
     add_transaction(conn, 40, "Split", 15, account_name="Card A")
-    add_transaction(conn, 70, "Her", 82, account_name="Card A")
+    add_transaction(conn, 70, "Venmo", 82, account_name="Card A")
 
     data = dashboard_data(conn, "2026-05")
 
