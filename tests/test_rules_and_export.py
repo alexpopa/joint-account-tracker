@@ -9,7 +9,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from joint_expense_tracker.db import get_db, init_db
 from joint_expense_tracker.models import ParsedAlert
 from joint_expense_tracker.rules import apply_rules, joint_amount_for_status, tip_amount_from_percent, tip_percent_from_amount
-from joint_expense_tracker.services import classify_transaction, create_manual_transaction, dashboard_data, export_month, insert_alert, update_transaction
+from joint_expense_tracker.services import analytics_data, classify_transaction, create_manual_transaction, dashboard_data, export_month, insert_alert, update_transaction
 from joint_expense_tracker.web import classify
 
 
@@ -397,6 +397,27 @@ def test_dashboard_review_count_is_not_limited_to_preview(tmp_path: Path) -> Non
     assert data["needs_review_count"] == 18
     assert data["needs_review_display_count"] == 15
     assert len(data["needs_review"]) == 15
+
+
+def test_analytics_data_fills_months_and_includes_every_status(tmp_path: Path) -> None:
+    db_path = tmp_path / "app.sqlite"
+    init_db(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+
+    create_manual_transaction(conn, "2026-01-10", "Joint Store", 30, status="Joint")
+    create_manual_transaction(conn, "2026-03-10", "Review Store", 20, status="Review")
+
+    data = analytics_data(conn, "2026-03", "2026-01")
+    conn.close()
+
+    assert data["months"] == ["2026-01", "2026-02", "2026-03"]
+    assert [status["key"] for status in data["series"]] == ["Joint", "Personal", "Wife", "Her", "Split", "Review", "Ignored"]
+    series = {status["key"]: status for status in data["series"]}
+    assert series["Joint"]["counts"] == [1, 0, 0]
+    assert series["Joint"]["amounts"] == [30.0, 0.0, 0.0]
+    assert series["Review"]["counts"] == [0, 0, 1]
+    assert data["total_transactions"] == 2
 
 
 def test_dashboard_status_totals_mix_reimbursement_and_transaction_amounts(tmp_path: Path) -> None:

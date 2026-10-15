@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+{% block title %}Trends · Joint Expense Tracker{% endblock %}
+{% block content %}
+<section class="page-head analytics-head">
+  <div>
+    <p class="eyebrow">Trends</p>
+    <h1>Status over time</h1>
+    <p>One simple monthly view for each status.</p>
+  </div>
+  <form class="date-range" method="get" action="/analytics">
+    <label>From <input name="start_month" type="month" value="{{ start_month }}" aria-label="Start month"></label>
+    <span class="date-range-separator">to</span>
+    <label>To <input name="end_month" type="month" value="{{ end_month }}" aria-label="End month"></label>
+    <button type="submit">Update</button>
+  </form>
+</section>
+
+<p class="range-note"><strong>{{ range_label }}</strong><span>{{ total_transactions }} transactions across all statuses</span></p>
+
+<section class="status-chart-grid" aria-label="Monthly status charts">
+  {% for status in series %}
+  <article class="status-card" style="--status-color: {{ status.color }}">
+    <div class="status-card-head">
+      <div class="status-card-title">
+        <span class="status-dot" aria-hidden="true"></span>
+        <div>
+          <h2>{{ status.label }}</h2>
+          <p>Monthly transactions</p>
+        </div>
+      </div>
+      <div class="status-summary" aria-label="{{ status.label }} totals for {{ range_label }}">
+        <strong>{{ status.total_count }}</strong><span>transactions</span>
+        <strong>${{ "%.2f"|format(status.total_amount) }}</strong><span>tracked</span>
+      </div>
+    </div>
+    <div class="status-chart-viewport">
+      <svg class="status-chart" data-status-key="{{ status.key }}" role="img" aria-label="{{ status.label }} transaction count by month from {{ range_label }}"></svg>
+      <p class="chart-empty" hidden>No {{ (status.label)|lower }} transactions in this range.</p>
+    </div>
+  </article>
+  {% endfor %}
+</section>
+
+<details class="trend-details">
+  <summary>View monthly detail</summary>
+  <div class="table-wrap trend-table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Month</th>
+          {% for status in series %}<th>{{ status.label }}</th>{% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in monthly %}
+        <tr>
+          <th scope="row">{{ row.label }}</th>
+          {% for status in series %}
+          <td>
+            <strong>{{ row.counts[status.key] }}</strong>
+            <span>${{ "%.2f"|format(row.amounts[status.key]) }}</span>
+          </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</details>
+
+<script id="analytics-data" type="application/json">{{ chart_data|tojson }}</script>
+<script>
+(() => {
+  const chartData = JSON.parse(document.getElementById("analytics-data").textContent);
+  const svgNamespace = "http://www.w3.org/2000/svg";
+  const chartWidth = 900;
+  const chartHeight = 240;
+  const margin = { top: 12, right: 18, bottom: 42, left: 44 };
+  const plotWidth = chartWidth - margin.left - margin.right;
+  const plotHeight = chartHeight - margin.top - margin.bottom;
+
+  function element(name, attributes = {}) {
+    const node = document.createElementNS(svgNamespace, name);
+    Object.entries(attributes).forEach(([key, value]) => node.setAttribute(key, value));
+    return node;
+  }
+
+  function niceMaximum(value) {
+    if (value <= 0) return 1;
+    const magnitude = 10 ** Math.floor(Math.log10(value));
+    const normalized = value / magnitude;
+    const step = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+    return step * magnitude;
+  }
+
+  function formatCount(value) {
+    if (Number.isInteger(value)) return `${value}`;
+    return value.toFixed(value < 1 ? 2 : 1).replace(/0+$/, "").replace(/\.$/, "");
+  }
+
+  function formatMonth(month) {
+    const [year, monthNumber] = month.split("-").map(Number);
+    return new Date(year, monthNumber - 1, 1).toLocaleDateString(undefined, { month: "short", year: "2-digit" });
+  }
+
+  function drawStatusChart(svg, statusKey) {
+    const item = chartData.series.find((series) => series.key === statusKey);
+    if (!item) return;
+    const displayLabel = item.label;
+    const emptyMessage = svg.parentElement.querySelector(".chart-empty");
+    const months = chartData.months;
+    const values = item.counts;
+    const maximum = Math.max(...values, 0);
+    const scaleMaximum = niceMaximum(maximum);
+    const x = (index) => margin.left + (months.length <= 1 ? plotWidth / 2 : (index / (months.length - 1)) * plotWidth);
+    const y = (value) => margin.top + plotHeight - (value / scaleMaximum) * plotHeight;
+
+    svg.setAttribute("viewBox", `0 0 ${chartWidth} ${chartHeight}`);
+    svg.replaceChildren();
+    const grid = element("g", { class: "chart-grid" });
+    const axis = element("g", { class: "chart-axis" });
+
+    for (let tick = 0; tick <= 4; tick += 1) {
+      const value = (scaleMaximum / 4) * tick;
+      const yPosition = y(value);
+      grid.appendChild(element("line", { x1: margin.left, x2: chartWidth - margin.right, y1: yPosition, y2: yPosition }));
+      const label = element("text", { x: margin.left - 9, y: yPosition + 4, "text-anchor": "end" });
+      label.textContent = formatCount(value);
+      axis.appendChild(label);
+    }
+
+    const labelStep = Math.max(1, Math.ceil(months.length / 7));
+    months.forEach((month, index) => {
+      if (index % labelStep !== 0 && index !== months.length - 1) return;
+      const label = element("text", { x: x(index), y: chartHeight - 13, "text-anchor": "middle" });
+      label.textContent = formatMonth(month);
+      axis.appendChild(label);
+    });
+
+    svg.appendChild(grid);
+    svg.appendChild(axis);
+    if (maximum === 0) {
+      emptyMessage.hidden = false;
+      return;
+    }
+    emptyMessage.hidden = true;
+
+    const points = values.map((value, index) => `${x(index)},${y(value)}`);
+    const path = element("polyline", {
+      points: points.join(" "),
+      fill: "none",
+      stroke: item.color,
+      "stroke-width": "3",
+      "stroke-linecap": "round",
+      "stroke-linejoin": "round",
+    });
+    const pathTitle = element("title");
+    pathTitle.textContent = displayLabel;
+    path.appendChild(pathTitle);
+    const lines = element("g", { class: "chart-lines" });
+    lines.appendChild(path);
+    values.forEach((value, index) => {
+      const point = element("circle", { cx: x(index), cy: y(value), r: "3.5", fill: item.color });
+      const pointTitle = element("title");
+      pointTitle.textContent = `${formatMonth(months[index])}: ${value} transaction${value === 1 ? "" : "s"} · $${item.amounts[index].toFixed(2)} tracked`;
+      point.appendChild(pointTitle);
+      lines.appendChild(point);
+    });
+    svg.appendChild(lines);
+  }
+
+  document.querySelectorAll("[data-status-key]").forEach((svg) => drawStatusChart(svg, svg.dataset.statusKey));
+})();
+</script>
+{% endblock %}

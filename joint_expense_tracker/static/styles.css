@@ -33,6 +33,7 @@ body {
 .brand { font-weight: 800; color: var(--text); text-decoration: none; }
 nav { display: flex; flex-wrap: wrap; gap: 12px; }
 nav a, a { color: var(--accent-dark); }
+nav a[aria-current="page"] { color: var(--text); font-weight: 800; text-decoration: none; }
 .shell { max-width: 1220px; margin: 0 auto; padding: 28px; }
 .page-head {
   display: flex;
@@ -175,6 +176,119 @@ tr:last-child td { border-bottom: 0; }
 }
 .edit-form label { display: grid; gap: 6px; color: var(--muted); font-weight: 700; }
 .actions { display: flex; gap: 10px; align-items: center; }
+.eyebrow {
+  margin-bottom: 5px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.analytics-head { align-items: center; }
+.date-range {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+.date-range label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+.date-range input { padding: 7px 8px; }
+.date-range button { padding: 8px 11px; }
+.date-range-separator { color: var(--muted); }
+.range-note {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: -8px 0 20px;
+  font-size: 13px;
+}
+.range-note span { color: var(--muted); }
+.status-chart-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+}
+.status-card {
+  flex: 1 1 calc(50% - 9px);
+  width: calc(50% - 9px);
+  min-width: 0;
+  padding: 18px 20px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--status-color);
+  border-radius: 10px;
+}
+.status-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+.status-card-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+.status-dot {
+  width: 10px;
+  height: 10px;
+  margin-top: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--status-color);
+}
+.status-card h2 { margin: 0 0 3px; font-size: 18px; }
+.status-card-head p { font-size: 13px; }
+.status-summary {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 1px 6px;
+  align-items: baseline;
+  text-align: right;
+  white-space: nowrap;
+}
+.status-summary strong { font-size: 15px; font-variant-numeric: tabular-nums; }
+.status-summary span { color: var(--muted); font-size: 11px; }
+.status-chart-viewport { position: relative; min-height: 190px; margin-top: 12px; }
+.status-chart { display: block; width: 100%; height: auto; overflow: visible; }
+.chart-grid line { stroke: var(--line); stroke-width: 1; }
+.chart-axis text {
+  fill: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.chart-empty {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: max-content;
+  color: var(--muted);
+  font-size: 13px;
+}
+.trend-details { margin-top: 22px; }
+.trend-details summary {
+  display: inline-block;
+  color: var(--accent-dark);
+  cursor: pointer;
+  font-weight: 700;
+}
+.trend-table-wrap { margin-top: 12px; overflow-x: auto; }
+.trend-table-wrap table { min-width: 820px; }
+.trend-table-wrap th:not(:first-child), .trend-table-wrap td { text-align: right; }
+.trend-table-wrap tbody th { font-weight: 700; white-space: nowrap; }
+.trend-table-wrap td strong, .trend-table-wrap td span { display: block; }
+.trend-table-wrap td span { color: var(--muted); font-size: 12px; }
 .notice {
   padding: 12px;
   background: #fff8e8;
@@ -192,11 +306,13 @@ tr:last-child td { border-bottom: 0; }
 @media (max-width: 840px) {
   .topbar, .page-head { align-items: flex-start; flex-direction: column; }
   .metrics, .grid-two { grid-template-columns: 1fr; }
+  .status-card { flex-basis: 100%; width: 100%; }
   .shell { padding: 18px; }
   .table-wrap { overflow-x: auto; }
   .table-wrap table { min-width: 100%; }
   .manual-form { grid-template-columns: 1fr; }
   .manual-form .form-wide { grid-column: auto; }
+  .date-range { width: 100%; flex-wrap: wrap; }
 }
 
 [data-personal-subcategory][hidden] { display: none; }

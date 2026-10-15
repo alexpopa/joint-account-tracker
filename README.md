@@ -76,3 +76,7 @@ pytest
 In Transactions, edit a Personal transaction and choose a Personal subcategory from the dropdown. Food and Video games are included to start; choose “+ Add new subcategory…” to create a name for reuse. You can also assign a subcategory when manually adding a Personal transaction, filter Transactions by it, and include it in CSV exports.
 
 Personal rules can assign subcategories to new imports. Existing Personal rules have an inline subcategory field and Save button. Updating a rule applies to future imports; existing transactions can be edited separately. Choosing “No subcategory” removes the assignment. Switching a transaction away from Personal clears its subcategory. Present and the Needs Review choices retain their existing behavior.
+
+### Monthly trends
+
+Open Trends to compare transaction counts and tracked amounts for every status by month. The default range covers twelve months through the latest transaction; choose From and To to change it. Missing months show zero transactions. Joint, Split, and Her use joint amounts; other statuses use original purchase amounts. Expand monthly detail for the underlying values.

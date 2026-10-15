@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,18 @@ from .db import get_db, rows_to_dicts, utc_now, save_subcategory
 from .models import ParsedAlert
 from .parser import extract_account_name
 from .rules import apply_rules, joint_amount_for_status, normalize_status, tip_amount_from_percent, tip_percent_from_amount
+
+
+STATUS_LABELS = {"Wife": "Present"}
+STATUS_COLORS = {
+    "Joint": "#196f5d",
+    "Personal": "#667085",
+    "Wife": "#c17a22",
+    "Her": "#9b5de5",
+    "Split": "#2f80ed",
+    "Review": "#d95d39",
+    "Ignored": "#a6ada9",
+}
 
 
 def account_name_for(conn: sqlite3.Connection, card_last4: str | None) -> str | None:
@@ -188,6 +201,110 @@ def update_transaction(conn: sqlite3.Connection, transaction_id: int, data: dict
 def months(conn: sqlite3.Connection) -> list[str]:
     rows = conn.execute("SELECT DISTINCT month FROM transactions ORDER BY month DESC").fetchall()
     return [str(row["month"]) for row in rows]
+
+
+def _normalize_month(value: str | None) -> str | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.strptime(value, "%Y-%m")
+    except (TypeError, ValueError):
+        return None
+    return parsed.strftime("%Y-%m")
+
+
+def _month_shift(month: str, offset: int) -> str:
+    year, month_number = (int(part) for part in month.split("-"))
+    absolute_month = year * 12 + month_number - 1 + offset
+    shifted_year, shifted_month = divmod(absolute_month, 12)
+    return f"{shifted_year:04d}-{shifted_month + 1:02d}"
+
+
+def _month_range(start_month: str, end_month: str) -> list[str]:
+    values: list[str] = []
+    current = start_month
+    while current <= end_month:
+        values.append(current)
+        current = _month_shift(current, 1)
+    return values
+
+
+def month_label(month: str) -> str:
+    return datetime.strptime(month, "%Y-%m").strftime("%b %Y")
+
+
+def analytics_data(
+    conn: sqlite3.Connection,
+    start_month: str | None = None,
+    end_month: str | None = None,
+) -> dict[str, Any]:
+    """Return a complete month-by-month series for every configured status."""
+    available_months = months(conn)
+    latest_month = available_months[0] if available_months else utc_now()[:7]
+    end = _normalize_month(end_month) or latest_month
+    start = _normalize_month(start_month) or _month_shift(end, -11)
+    if start > end:
+        start, end = end, start
+
+    month_values = _month_range(start, end)
+    month_indexes = {month: index for index, month in enumerate(month_values)}
+    series = {
+        status: {
+            "key": status,
+            "label": STATUS_LABELS.get(status, status),
+            "color": STATUS_COLORS.get(status, "#60706a"),
+            "counts": [0] * len(month_values),
+            "amounts": [0.0] * len(month_values),
+        }
+        for status in STATUSES
+    }
+
+    rows = conn.execute(
+        """
+        SELECT month, status, COUNT(*) AS count,
+               ROUND(SUM(CASE WHEN status IN ('Joint', 'Split', 'Her')
+                              THEN joint_amount ELSE amount END), 2) AS tracked_amount
+        FROM transactions
+        WHERE month BETWEEN ? AND ?
+        GROUP BY month, status
+        ORDER BY month, status
+        """,
+        (start, end),
+    ).fetchall()
+    for row in rows:
+        status = str(row["status"])
+        index = month_indexes.get(str(row["month"]))
+        if index is None or status not in series:
+            continue
+        series[status]["counts"][index] = int(row["count"] or 0)
+        series[status]["amounts"][index] = float(row["tracked_amount"] or 0)
+
+    series_values = list(series.values())
+    for status_data in series_values:
+        status_data["total_count"] = sum(status_data["counts"])
+        status_data["total_amount"] = round(sum(status_data["amounts"]), 2)
+
+    monthly = []
+    for index, month in enumerate(month_values):
+        monthly.append(
+            {
+                "month": month,
+                "label": month_label(month),
+                "counts": {status: data["counts"][index] for status, data in series.items()},
+                "amounts": {status: data["amounts"][index] for status, data in series.items()},
+            }
+        )
+
+    return {
+        "start_month": start,
+        "end_month": end,
+        "range_label": f"{month_label(start)} – {month_label(end)}",
+        "months": month_values,
+        "series": series_values,
+        "monthly": monthly,
+        "total_transactions": sum(data["total_count"] for data in series_values),
+        "chart_data": {"months": month_values, "series": series_values},
+    }
 
 
 def dashboard_data(conn: sqlite3.Connection, month: str | None = None) -> dict[str, Any]:

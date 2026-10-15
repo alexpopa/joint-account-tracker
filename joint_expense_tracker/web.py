@@ -12,7 +12,7 @@ from fastapi.templating import Jinja2Templates
 from .config import DATA_DIR, DEFAULT_CHASE_KEYWORDS, DEFAULT_CHASE_SENDERS, STATUSES
 from .db import get_db, init_db, rows_to_dicts, set_setting, utc_now, personal_subcategories, save_subcategory
 from .importer import diagnose_messages, import_messages
-from .services import classify_transaction, create_manual_transaction, dashboard_data, export_month, update_transaction
+from .services import analytics_data, classify_transaction, create_manual_transaction, dashboard_data, export_month, update_transaction
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -48,6 +48,13 @@ def dashboard(request: Request, month: Optional[str] = None):
     with get_db() as conn:
         data = dashboard_data(conn, month)
     return templates.TemplateResponse("dashboard.html", {"request": request, **data})
+
+
+@app.get("/analytics")
+def analytics(request: Request, start_month: Optional[str] = None, end_month: Optional[str] = None):
+    with get_db() as conn:
+        data = analytics_data(conn, start_month, end_month)
+    return templates.TemplateResponse("analytics.html", {"request": request, **data})
 
 
 @app.post("/import")
