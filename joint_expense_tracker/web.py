@@ -33,6 +33,7 @@ from .services import (
 )
 
 BASE_DIR = Path(__file__).resolve().parent
+TRANSACTIONS_PAGE_LIMIT = 500
 
 
 @asynccontextmanager
@@ -141,10 +142,11 @@ def transactions(
     with get_db() as conn:
         rows = rows_to_dicts(
             conn.execute(
-                f"SELECT * FROM transactions {where} ORDER BY transaction_datetime DESC, id DESC LIMIT 500",
-                params,
+                f"SELECT * FROM transactions {where} ORDER BY transaction_datetime DESC, id DESC LIMIT ?",
+                [*params, TRANSACTIONS_PAGE_LIMIT],
             ).fetchall()
         )
+        total = conn.execute(f"SELECT COUNT(*) FROM transactions {where}", params).fetchone()[0]
         all_months = [
             row["month"] for row in conn.execute("SELECT DISTINCT month FROM transactions ORDER BY month DESC")
         ]
@@ -164,6 +166,7 @@ def transactions(
         "transactions.html",
         {
             "transactions": rows,
+            "total_matching": total,
             "months": all_months,
             "accounts": accounts,
             "statuses": STATUSES,
