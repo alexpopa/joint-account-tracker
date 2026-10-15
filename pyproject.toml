@@ -1,0 +1,45 @@
+[project]
+name = "joint-expense-tracker"
+version = "0.2.0"
+description = "Local web app that tags Chase SMS purchase alerts and computes monthly joint-account reimbursements."
+readme = "README.md"
+requires-python = ">=3.15"
+dependencies = [
+    "fastapi>=0.143.2",
+    "jinja2>=3.1.6",
+    "python-multipart>=0.0.32",
+    "uvicorn>=0.54.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.13.1",
+    "pytest>=9.1.1",
+    "ruff>=0.17.1",
+]
+
+[tool.uv]
+# This is an app, not a library: don't build/install it, just run it from the repo.
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+# Deprecations from FastAPI/Starlette should be fixed, not ignored.
+filterwarnings = ["error"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py315"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle
+    "F",   # pyflakes
+    "I",   # import sorting
+    "UP",  # pyupgrade
+    "B",   # bugbear
+    "SIM", # simplify
+]
+# `ruff format` owns line length; the long lines left are alert texts, regexes, and SQL.
+ignore = ["E501"]

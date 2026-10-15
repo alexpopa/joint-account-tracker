@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 APP_NAME = "Joint Expense Tracker"
-DATA_DIR = Path.home() / ".joint-expense-tracker"
+DATA_DIR = Path(os.environ.get("JOINT_EXPENSE_TRACKER_HOME", Path.home() / ".joint-expense-tracker"))
 DB_PATH = DATA_DIR / "joint_expenses.sqlite"
 SNAPSHOT_DIR = DATA_DIR / "messages_snapshot"
 EXPORT_DIR = DATA_DIR / "exports"

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import Any
 from datetime import date
 from pathlib import Path
 from typing import Optional
@@ -12,18 +15,31 @@ from fastapi.templating import Jinja2Templates
 from .config import DATA_DIR, DEFAULT_CHASE_KEYWORDS, DEFAULT_CHASE_SENDERS, STATUSES
 from .db import get_db, init_db, rows_to_dicts, set_setting, utc_now, personal_subcategories, save_subcategory
 from .importer import diagnose_messages, import_messages
-from .services import analytics_data, classify_transaction, create_manual_transaction, dashboard_data, export_month, update_transaction
+from .services import (
+    analytics_data,
+    classify_transaction,
+    create_manual_transaction,
+    dashboard_data,
+    export_month,
+    update_transaction,
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 
-app = FastAPI(title="Joint Expense Tracker")
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    init_db()
+    yield
+
+
+app = FastAPI(title="Joint Expense Tracker", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 
-@app.on_event("startup")
-def startup() -> None:
-    init_db()
+def render(request: Request, name: str, context: dict[str, Any]):
+    return templates.TemplateResponse(request, name, context)
 
 
 def redirect(path: str) -> RedirectResponse:
@@ -47,14 +63,14 @@ def optional_float(value: str | float | None, field_name: str) -> float | None:
 def dashboard(request: Request, month: Optional[str] = None):
     with get_db() as conn:
         data = dashboard_data(conn, month)
-    return templates.TemplateResponse("dashboard.html", {"request": request, **data})
+    return render(request, "dashboard.html", {"request": request, **data})
 
 
 @app.get("/analytics")
 def analytics(request: Request, start_month: Optional[str] = None, end_month: Optional[str] = None):
     with get_db() as conn:
         data = analytics_data(conn, start_month, end_month)
-    return templates.TemplateResponse("analytics.html", {"request": request, **data})
+    return render(request, "analytics.html", {"request": request, **data})
 
 
 @app.post("/import")
@@ -65,7 +81,7 @@ def import_now():
 
 @app.get("/diagnostics")
 def diagnostics(request: Request):
-    return templates.TemplateResponse("diagnostics.html", {"request": request, "lines": diagnose_messages()})
+    return render(request, "diagnostics.html", {"request": request, "lines": diagnose_messages()})
 
 
 @app.get("/export")
@@ -111,9 +127,14 @@ def transactions(
             ).fetchall()
         )
         categories = personal_subcategories(conn)
-        all_months = rows_to_dicts(conn.execute("SELECT DISTINCT month FROM transactions ORDER BY month DESC").fetchall())
-        accounts = rows_to_dicts(conn.execute("SELECT * FROM accounts WHERE active = 1 ORDER BY account_name").fetchall())
-    return templates.TemplateResponse(
+        all_months = rows_to_dicts(
+            conn.execute("SELECT DISTINCT month FROM transactions ORDER BY month DESC").fetchall()
+        )
+        accounts = rows_to_dicts(
+            conn.execute("SELECT * FROM accounts WHERE active = 1 ORDER BY account_name").fetchall()
+        )
+    return render(
+        request,
         "transactions.html",
         {
             "request": request,
@@ -123,7 +144,13 @@ def transactions(
             "statuses": STATUSES,
             "subcategories": categories,
             "today": date.today().isoformat(),
-            "filters": {"month": month or "", "status": status or "", "account": account or "", "q": q or "", "subcategory": subcategory or ""},
+            "filters": {
+                "month": month or "",
+                "status": status or "",
+                "account": account or "",
+                "q": q or "",
+                "subcategory": subcategory or "",
+            },
         },
     )
 
@@ -189,7 +216,8 @@ def edit_transaction(request: Request, transaction_id: int):
         if not row:
             raise HTTPException(status_code=404, detail="Transaction not found")
         categories = personal_subcategories(conn)
-    return templates.TemplateResponse(
+    return render(
+        request,
         "transaction_edit.html",
         {"request": request, "transaction": dict(row), "statuses": STATUSES, "subcategories": categories},
     )
@@ -231,7 +259,7 @@ def save_transaction(
 def accounts(request: Request):
     with get_db() as conn:
         rows = rows_to_dicts(conn.execute("SELECT * FROM accounts ORDER BY active DESC, account_name").fetchall())
-    return templates.TemplateResponse("accounts.html", {"request": request, "accounts": rows})
+    return render(request, "accounts.html", {"request": request, "accounts": rows})
 
 
 @app.post("/accounts")
@@ -256,7 +284,9 @@ def rules(request: Request):
     with get_db() as conn:
         rows = rows_to_dicts(conn.execute("SELECT * FROM rules ORDER BY active DESC, priority ASC, id ASC").fetchall())
         categories = personal_subcategories(conn)
-    return templates.TemplateResponse("rules.html", {"request": request, "rules": rows, "statuses": STATUSES, "subcategories": categories})
+    return render(
+        request, "rules.html", {"request": request, "rules": rows, "statuses": STATUSES, "subcategories": categories}
+    )
 
 
 @app.post("/rules")
@@ -305,7 +335,8 @@ def settings(request: Request):
     with get_db() as conn:
         settings_rows = rows_to_dicts(conn.execute("SELECT * FROM settings ORDER BY key").fetchall())
     settings_map = {row["key"]: row["value"] for row in settings_rows}
-    return templates.TemplateResponse(
+    return render(
+        request,
         "settings.html",
         {
             "request": request,

@@ -14,13 +14,13 @@ Local-only Mac app for importing Chase SMS purchase alerts from Apple Messages, 
 
 ## Setup
 
+Requires uv and Python 3.15; `uv sync` installs the locked dependencies.
+
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python -m joint_expense_tracker init
-python -m joint_expense_tracker import-messages
-python -m joint_expense_tracker web --host 0.0.0.0 --port 8787
+uv sync
+uv run python -m joint_expense_tracker init
+uv run python -m joint_expense_tracker import-messages
+uv run python -m joint_expense_tracker web --host 0.0.0.0 --port 8787
 ```
 
 Open `http://<tailscale-ip-or-hostname>:8787` from a Tailscale-connected device, or [http://127.0.0.1:8787](http://127.0.0.1:8787) on this Mac.
@@ -28,11 +28,11 @@ Open `http://<tailscale-ip-or-hostname>:8787` from a Tailscale-connected device,
 ## Commands
 
 ```bash
-python -m joint_expense_tracker init
-python -m joint_expense_tracker diagnose-messages
-python -m joint_expense_tracker import-messages
-python -m joint_expense_tracker export --month 2026-05
-python -m joint_expense_tracker web --host 0.0.0.0 --port 8787
+uv run python -m joint_expense_tracker init
+uv run python -m joint_expense_tracker diagnose-messages
+uv run python -m joint_expense_tracker import-messages
+uv run python -m joint_expense_tracker export --month 2026-05
+uv run python -m joint_expense_tracker web --host 0.0.0.0 --port 8787
 ```
 
 ## Full Disk Access
@@ -44,7 +44,7 @@ System Settings -> Privacy & Security -> Full Disk Access -> enable Terminal, or
 Then retry:
 
 ```bash
-python -m joint_expense_tracker diagnose-messages
+uv run python -m joint_expense_tracker diagnose-messages
 ```
 
 The diagnostic command prints whether `chat.db` exists, whether copying succeeded, and recent sender IDs with dollar-message counts. It does not dump full message text by default.
@@ -68,7 +68,9 @@ The diagnostic command prints whether `chat.db` exists, whether copying succeede
 ## Tests
 
 ```bash
-pytest
+uv run pytest
+uv run ruff check .
+uv run ruff format .
 ```
 
 ### Personal subcategories
