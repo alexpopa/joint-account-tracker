@@ -372,10 +372,7 @@ def dashboard_data(conn: sqlite3.Connection, month: str | None = None) -> dict[s
             params,
         ).fetchall()
     )
-    needs_review_count = conn.execute(
-        "SELECT COUNT(*) AS count FROM transactions WHERE month = ? AND status = 'Review'",
-        params,
-    ).fetchone()["count"]
+    needs_review_count = review_count(conn, selected)
     review = rows_to_dicts(
         conn.execute(
             """
@@ -387,6 +384,9 @@ def dashboard_data(conn: sqlite3.Connection, month: str | None = None) -> dict[s
             (*params, review_limit),
         ).fetchall()
     )
+    tags = last_tags(conn, [item["merchant"] for item in review])
+    for item in review:
+        item["suggestion"] = tags.get((item["merchant"] or "").lower())
     totals = conn.execute(
         f"""
         SELECT ROUND(COALESCE(SUM({JOINT_SPEND_SQL}), 0), 2) AS joint,
@@ -411,9 +411,60 @@ def dashboard_data(conn: sqlite3.Connection, month: str | None = None) -> dict[s
         "needs_review_count": needs_review_count,
         "needs_review_display_count": len(review),
         "needs_review_limit": review_limit,
+        "categories": popular_categories(conn),
         "statuses": STATUSES,
         "last_import": last_import(conn),
     }
+
+
+def review_count(conn: sqlite3.Connection, month: str) -> int:
+    row = conn.execute("SELECT COUNT(*) FROM transactions WHERE month = ? AND status = 'Review'", (month,)).fetchone()
+    return int(row[0])
+
+
+def last_tags(conn: sqlite3.Connection, merchants: list[str]) -> dict[str, dict[str, Any]]:
+    """The most recent Joint/Personal/Venmo tag for each merchant (case-insensitive), keyed by lowercased name.
+
+    Personal + Present comes back as the "Present" shortcut so it can be re-applied in one tap.
+    Pieces of a split are skipped: they say how one purchase was divided, not what the merchant usually is.
+    """
+    names = sorted({m.lower() for m in merchants if m})
+    if not names:
+        return {}
+    rows = conn.execute(
+        f"""
+        SELECT LOWER(merchant) AS merchant, status, subcategory
+        FROM transactions
+        WHERE status IN ('Joint', 'Personal', 'Venmo') AND LOWER(merchant) IN ({", ".join("?" * len(names))})
+          AND COALESCE(note, '') NOT LIKE '%Split $%' AND COALESCE(note, '') NOT LIKE '%Rest of split%'
+        ORDER BY transaction_datetime DESC, id DESC
+        """,
+        names,
+    ).fetchall()
+    tags: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if row["merchant"] in tags:
+            continue
+        status, category = row["status"], row["subcategory"]
+        if status == "Personal" and category and category.lower() == PRESENT.lower():
+            status, category = PRESENT, None
+        tags[row["merchant"]] = {"status": status, "category": category if status != "Venmo" else None}
+    return tags
+
+
+def popular_categories(conn: sqlite3.Connection) -> list[str]:
+    """Category names, most used first. Present is left out: it has its own button."""
+    rows = conn.execute(
+        """
+        SELECT c.name FROM personal_subcategories c
+        LEFT JOIN transactions t ON t.subcategory = c.name COLLATE NOCASE AND t.status IN ('Joint', 'Split', 'Personal')
+        WHERE c.name != ? COLLATE NOCASE
+        GROUP BY c.name
+        ORDER BY COUNT(t.id) DESC, c.name COLLATE NOCASE
+        """,
+        (PRESENT,),
+    ).fetchall()
+    return [row["name"] for row in rows]
 
 
 def _ranked(amounts: dict[str, float]) -> list[dict[str, Any]]:

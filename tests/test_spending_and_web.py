@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from joint_expense_tracker.charts import nice_ticks, stacked_columns
 from joint_expense_tracker.db import get_db
-from joint_expense_tracker.services import create_manual_transaction, spending_data
+from joint_expense_tracker.services import create_manual_transaction, dashboard_data, spending_data
 
 
 def seed_month(conn) -> None:
@@ -118,3 +118,19 @@ def test_return_to_cannot_leave_the_site(client) -> None:
         "/transactions/1/classify", data={"status": "Joint", "return_to": "//evil.example"}, follow_redirects=False
     )
     assert response.headers["location"] == "/"
+
+
+def test_review_cards_suggest_the_last_tag_per_merchant(conn) -> None:
+    seed_month(conn)
+    create_manual_transaction(conn, "2026-09-20", "TRADER JOE'S", 30, status="Review")
+    create_manual_transaction(conn, "2026-09-21", "Flowers", 25, status="Review")
+    create_manual_transaction(conn, "2026-09-22", "Her shoes", 50, status="Review")
+
+    data = dashboard_data(conn, "2026-09")
+    suggestions = {item["merchant"]: item["suggestion"] for item in data["needs_review"]}
+    assert suggestions["TRADER JOE'S"] == {"status": "Joint", "category": "Groceries"}
+    assert suggestions["Flowers"] == {"status": "Present", "category": None}
+    assert suggestions["Her shoes"] == {"status": "Venmo", "category": None}
+    assert suggestions["Unreviewed"] is None
+    assert data["categories"][0] == "Groceries" and "Present" not in data["categories"]
+
