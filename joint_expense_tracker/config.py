@@ -8,6 +8,8 @@ DATA_DIR = Path(os.environ.get("JOINT_EXPENSE_TRACKER_HOME", Path.home() / ".joi
 DB_PATH = DATA_DIR / "joint_expenses.sqlite"
 SNAPSHOT_DIR = DATA_DIR / "messages_snapshot"
 EXPORT_DIR = DATA_DIR / "exports"
+BACKUP_DIR = DATA_DIR / "backups"
+BACKUPS_TO_KEEP = 30
 DEFAULT_MESSAGES_DB = Path.home() / "Library" / "Messages" / "chat.db"
 
 DEFAULT_CHASE_SENDERS = ["24273", "28107", "33172", "72166", "74869"]
@@ -20,3 +22,4 @@ def ensure_data_dirs() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)

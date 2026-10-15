@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 
 from .config import DEFAULT_CHASE_KEYWORDS, DEFAULT_CHASE_SENDERS, DEFAULT_MESSAGES_DB, SNAPSHOT_DIR, ensure_data_dirs
-from .db import get_db, get_setting, utc_now
+from .db import backup_database, get_db, get_setting, utc_now
 from .parser import extract_amount, parse_alert
 from .services import insert_alert
 
@@ -134,6 +134,7 @@ def _candidate_messages(
 def import_messages() -> ImportResult:
     result = ImportResult()
     started_at = utc_now()
+    backup_database()
     with get_db() as app_conn:
         run_id = app_conn.execute(
             "INSERT INTO import_runs (started_at) VALUES (?)",

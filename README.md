@@ -31,6 +31,7 @@ Open `http://<tailscale-ip-or-hostname>:8787` from a Tailscale-connected device,
 uv run python -m joint_expense_tracker init
 uv run python -m joint_expense_tracker diagnose-messages
 uv run python -m joint_expense_tracker import-messages
+uv run python -m joint_expense_tracker backup
 uv run python -m joint_expense_tracker export --month 2026-05
 uv run python -m joint_expense_tracker web --host 0.0.0.0 --port 8787
 ```
@@ -49,11 +50,18 @@ uv run python -m joint_expense_tracker diagnose-messages
 
 The diagnostic command prints whether `chat.db` exists, whether copying succeeded, and recent sender IDs with dollar-message counts. It does not dump full message text by default.
 
-## Data Files
+## Data Files and Backups
 
 - App database: `~/.joint-expense-tracker/joint_expenses.sqlite`
+- Backups: `~/.joint-expense-tracker/backups/`
 - Messages snapshot: `~/.joint-expense-tracker/messages_snapshot/`
 - CSV exports: `~/.joint-expense-tracker/exports/`
+
+The database is the only copy of your tagging work. The app backs it up automatically
+once a day (on the first import), keeps the last 30 daily copies, and also backs up
+before any database upgrade. Run `backup` for an extra copy anytime. To restore, stop
+the LaunchAgent, copy a backup over `joint_expenses.sqlite`, and start it again.
+Time Machine also covers this folder if it's enabled.
 
 ## Workflow
 

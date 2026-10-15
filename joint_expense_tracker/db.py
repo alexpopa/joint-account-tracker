@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from .config import (
+    BACKUP_DIR,
+    BACKUPS_TO_KEEP,
     DB_PATH,
     DEFAULT_CHASE_KEYWORDS,
     DEFAULT_CHASE_SENDERS,
@@ -114,7 +116,9 @@ def init_db(db_path: Path = DB_PATH) -> None:
             if column not in columns:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
         conn.execute("CREATE TABLE IF NOT EXISTS personal_subcategories (name TEXT PRIMARY KEY COLLATE NOCASE)")
-        conn.executemany("INSERT OR IGNORE INTO personal_subcategories (name) VALUES (?)", [("Food",), ("Video games",)])
+        conn.executemany(
+            "INSERT OR IGNORE INTO personal_subcategories (name) VALUES (?)", [("Food",), ("Video games",)]
+        )
         defaults: dict[str, Any] = {
             "messages_db_path": str(DEFAULT_MESSAGES_DB),
             "chase_sender_filters": ",".join(DEFAULT_CHASE_SENDERS),
@@ -140,6 +144,57 @@ def init_db(db_path: Path = DB_PATH) -> None:
                 """,
                 (*rule, rule[0]),
             )
+        conn.commit()
+        _run_migrations(conn, db_path)
+
+
+MIGRATIONS = []
+
+
+def _run_migrations(conn: sqlite3.Connection, db_path: Path) -> None:
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    if version >= len(MIGRATIONS):
+        return
+    has_data = conn.execute("SELECT EXISTS (SELECT 1 FROM transactions)").fetchone()[0]
+    if has_data:
+        backup_database(db_path, label=f"before-v{len(MIGRATIONS)}")
+    for number, migration in enumerate(MIGRATIONS[version:], start=version + 1):
+        conn.execute("BEGIN")
+        try:
+            migration(conn)
+            conn.execute(f"PRAGMA user_version = {number}")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+
+def backup_database(db_path: Path = DB_PATH, *, label: str | None = None, backup_dir: Path = BACKUP_DIR) -> Path | None:
+    """Copy the database into backup_dir.
+
+    Without a label this is the daily backup: at most one per day, keeping the newest
+    BACKUPS_TO_KEEP. Labeled backups (e.g. before a migration) are always written and never pruned.
+    Returns the path written, or None if today's daily backup already exists.
+    """
+    if not db_path.exists():
+        return None
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y-%m-%d")
+    target = backup_dir / (f"joint_expenses-{stamp}-{label}.sqlite" if label else f"joint_expenses-{stamp}.sqlite")
+    if target.exists() and not label:
+        return None
+    source = sqlite3.connect(db_path)
+    destination = sqlite3.connect(target)
+    try:
+        source.backup(destination)
+    finally:
+        destination.close()
+        source.close()
+    if not label:
+        daily = sorted(backup_dir.glob("joint_expenses-????-??-??.sqlite"))
+        for old in daily[:-BACKUPS_TO_KEEP]:
+            old.unlink()
+    return target
 
 
 def _migrate_transactions(conn: sqlite3.Connection) -> None:

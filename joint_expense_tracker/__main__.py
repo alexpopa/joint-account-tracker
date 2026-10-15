@@ -4,7 +4,8 @@ import argparse
 
 import uvicorn
 
-from .db import init_db
+from .config import DB_PATH
+from .db import backup_database, init_db
 from .importer import diagnose_messages, import_messages
 from .services import export_month
 
@@ -15,6 +16,7 @@ def main() -> None:
     sub.add_parser("init")
     sub.add_parser("import-messages")
     sub.add_parser("diagnose-messages")
+    sub.add_parser("backup", help="copy the database into the backups folder now")
     export_parser = sub.add_parser("export")
     export_parser.add_argument("--month", required=True)
     web_parser = sub.add_parser("web")
@@ -24,7 +26,7 @@ def main() -> None:
     args = parser.parse_args()
     if args.command == "init":
         init_db()
-        print("Initialized ~/.joint-expense-tracker/joint_expenses.sqlite")
+        print(f"Initialized {DB_PATH}")
     elif args.command == "import-messages":
         init_db()
         result = import_messages()
@@ -41,6 +43,10 @@ def main() -> None:
         transaction_path, summary_path = export_month(args.month)
         print(f"Transactions CSV: {transaction_path}")
         print(f"Summary CSV: {summary_path}")
+    elif args.command == "backup":
+        init_db()
+        path = backup_database(label="manual")
+        print(f"Backup written to {path}")
     elif args.command == "web":
         init_db()
         uvicorn.run("joint_expense_tracker.web:app", host=args.host, port=args.port, reload=False)
