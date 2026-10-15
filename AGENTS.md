@@ -32,6 +32,24 @@ migration 4 converted them.
 | `Review` | Default for new imports | `0` | nothing |
 | `Ignored` | Card payments, deposits, refunds, noise | `0` | nothing |
 
+**Splitting into two rows** (`services.split_transaction`) is separate from the `Split`
+status. A review card's Split box cuts one purchase in two. The typed amount is tagged
+with whichever button was tapped. The rest, `amount + tip − part`, becomes a new
+`Review` row with the same merchant, date, card, and alert text. Neither row keeps a
+tip, so the two always add up to the full charge. The original row keeps the
+`source_guid`; the new row has none. Both rows get a note (`Split $X of $Y` /
+`Rest of split …`). `unsplit_transaction` reverses it (the card's Undo).
+Migration 6 adds `split_undo`: each new split records the exact parent/remainder IDs,
+original amount and note, and snapshots of both pieces. Undo requires that recorded
+pair and unchanged row contents (except `updated_at`), restores the saved amount,
+and consumes the record. Browser-supplied tip amounts cannot change the restoration.
+Older splits without a record must be edited manually; never infer a pair from
+matching dates, alert text, or notes. Split pieces
+are skipped when suggesting "last time". Split rows no longer match their alert's
+amount, so a later refund for the full amount won't auto-pair with them.
+The `Split` status (one row, joint part + personal rest) still exists for older data
+and the Edit page.
+
 **Presents** for the partner are `Personal` with the category `Present`
 (`config.PRESENT`). "Present" is accepted as a status shortcut (the quick button,
 rules) and stored as Personal + Present by `services.resolve_status`.

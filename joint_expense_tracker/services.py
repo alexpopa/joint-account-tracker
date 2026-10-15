@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -257,6 +258,119 @@ def classify_transaction(
             transaction_id,
         ),
     )
+
+
+def _split_snapshot(row: sqlite3.Row) -> str:
+    # Timestamps alone do not change the financial or descriptive state of a row.
+    snapshot = dict(row)
+    snapshot.pop("updated_at", None)
+    return json.dumps(snapshot, sort_keys=True)
+
+
+def _split_note(part: float, total: float) -> str:
+    return f"Split ${part:.2f} of ${total:.2f}"
+
+
+def split_transaction(
+    conn: sqlite3.Connection,
+    transaction_id: int,
+    part: float,
+    status: str,
+    category: str | None = None,
+    tip_amount: float | None = None,
+) -> int:
+    """Cut a purchase in two: `part` is tagged `status`, the rest becomes a new Review row.
+
+    The tip is added to the charge first, so the two rows always add up to amount + tip
+    and neither keeps a tip of its own. The original row keeps the alert's GUID (so a
+    re-import doesn't duplicate it); the new row has none. Returns the new row's id.
+    """
+    status, category = resolve_status(status, category)
+    if status in {"Split", "Review"}:
+        raise ValueError("Pick who the split part was for")
+    row = conn.execute("SELECT * FROM transactions WHERE id = ?", (transaction_id,)).fetchone()
+    if not row:
+        raise ValueError("Transaction not found")
+    tip = round(max(0.0, tip_amount or 0.0), 2)
+    total = round(float(row["amount"]) + tip, 2)
+    part = round(part, 2)
+    if not 0 < part < total:
+        raise ValueError(f"Split must be more than $0 and less than ${total:.2f}")
+    rest = round(total - part, 2)
+    now = utc_now()
+    cursor = conn.execute(
+        """
+        INSERT INTO transactions (
+            source_sender, source_date_raw, transaction_datetime, month, amount, tip_amount,
+            merchant, card_last4, account_name, status, joint_amount, note, raw_text, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, 'Review', 0, ?, ?, ?, ?)
+        """,
+        (
+            row["source_sender"],
+            row["source_date_raw"],
+            row["transaction_datetime"],
+            row["month"],
+            rest,
+            row["merchant"],
+            row["card_last4"],
+            row["account_name"],
+            f"Rest of split (${rest:.2f} of ${total:.2f})",
+            row["raw_text"],
+            now,
+            now,
+        ),
+    )
+    conn.execute(
+        "UPDATE transactions SET amount = ?, note = ? WHERE id = ?",
+        (part, _append_note(row["note"], _split_note(part, total)), transaction_id),
+    )
+    classify_transaction(conn, transaction_id, status, category=category)
+    rest_id = int(cursor.lastrowid)
+    part_row = conn.execute("SELECT * FROM transactions WHERE id = ?", (transaction_id,)).fetchone()
+    rest_row = conn.execute("SELECT * FROM transactions WHERE id = ?", (rest_id,)).fetchone()
+    conn.execute(
+        "INSERT INTO split_undo "
+        "(rest_id, transaction_id, original_amount, original_note, part_snapshot, rest_snapshot) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (rest_id, transaction_id, row["amount"], row["note"], _split_snapshot(part_row), _split_snapshot(rest_row)),
+    )
+    return rest_id
+
+
+def unsplit_transaction(
+    conn: sqlite3.Connection, transaction_id: int, rest_id: int, tip_amount: float | None = None
+) -> None:
+    """Undo a recorded split whose two pieces still match their saved state.
+
+    The original amount and note come from the database. `tip_amount` remains an
+    accepted argument for older callers, but cannot influence the restored amount.
+    """
+    split = conn.execute(
+        "SELECT * FROM split_undo WHERE transaction_id = ? AND rest_id = ?", (transaction_id, rest_id)
+    ).fetchone()
+    row = conn.execute("SELECT * FROM transactions WHERE id = ?", (transaction_id,)).fetchone()
+    rest = conn.execute("SELECT * FROM transactions WHERE id = ?", (rest_id,)).fetchone()
+    if (
+        not split
+        or not row
+        or not rest
+        or transaction_id == rest_id
+        or _split_snapshot(row) != split["part_snapshot"]
+        or _split_snapshot(rest) != split["rest_snapshot"]
+    ):
+        raise ValueError("That split can't be undone automatically")
+    conn.execute(
+        """
+        UPDATE transactions
+        SET amount = ?, tip_amount = 0, tip_percent = NULL, status = 'Review', joint_amount = 0,
+            subcategory = NULL, note = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (split["original_amount"], split["original_note"], utc_now(), transaction_id),
+    )
+    conn.execute("DELETE FROM split_undo WHERE rest_id = ?", (rest_id,))
+    conn.execute("DELETE FROM transactions WHERE id = ?", (rest_id,))
 
 
 def _tip_values_from_edit(amount: float, data: dict[str, Any]) -> tuple[float | None, float]:

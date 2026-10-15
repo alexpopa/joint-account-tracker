@@ -134,3 +134,82 @@ def test_review_cards_suggest_the_last_tag_per_merchant(conn) -> None:
     assert suggestions["Unreviewed"] is None
     assert data["categories"][0] == "Groceries" and "Present" not in data["categories"]
 
+
+
+def test_split_cuts_a_purchase_into_two_rows_that_add_up(conn) -> None:
+    from joint_expense_tracker.services import split_transaction, unsplit_transaction
+
+    tx = create_manual_transaction(conn, "2026-09-12", "Dinner", 100, status="Review")
+    rest = split_transaction(conn, tx, 70, "Joint", "Dining", tip_amount=20)
+
+    rows = {
+        r["id"]: dict(r)
+        for r in conn.execute(
+            "SELECT id, status, amount, tip_amount, joint_amount, subcategory, note FROM transactions WHERE id IN (?, ?)",
+            (tx, rest),
+        )
+    }
+    assert (rows[tx]["status"], rows[tx]["amount"], rows[tx]["tip_amount"], rows[tx]["joint_amount"]) == (
+        "Joint",
+        70,
+        0,
+        70,
+    )
+    assert rows[tx]["subcategory"] == "Dining" and rows[tx]["note"] == "Split $70.00 of $120.00"
+    assert (rows[rest]["status"], rows[rest]["amount"], rows[rest]["joint_amount"]) == ("Review", 50, 0)
+
+    dashboard = dashboard_data(conn, "2026-09")
+    assert dashboard["total_joint"] == 70 and dashboard["needs_review_count"] == 1
+    assert dashboard["needs_review"][0]["suggestion"] is None, "a split piece isn't a 'last time' for the rest"
+
+    # The rest can be tagged on its own, e.g. as the partner's.
+    from joint_expense_tracker.services import classify_transaction
+
+    classify_transaction(conn, rest, "Venmo")
+    assert dashboard_data(conn, "2026-09")["total_venmo"] == 50
+    classify_transaction(conn, rest, "Review")
+
+    unsplit_transaction(conn, tx, rest, tip_amount=20)
+    row = conn.execute("SELECT status, amount, tip_amount, joint_amount, note FROM transactions WHERE id = ?", (tx,))
+    assert tuple(row.fetchone()) == ("Review", 100, 0, 0, None)
+    assert conn.execute("SELECT COUNT(*) FROM transactions WHERE id = ?", (rest,)).fetchone()[0] == 0
+
+
+def test_split_rejects_amounts_outside_the_charge(conn) -> None:
+    import pytest
+
+    from joint_expense_tracker.services import split_transaction
+
+    tx = create_manual_transaction(conn, "2026-09-12", "Dinner", 100, status="Review")
+    for bad in (0, 100, 130):
+        with pytest.raises(ValueError):
+            split_transaction(conn, tx, bad, "Joint")
+    with pytest.raises(ValueError):
+        split_transaction(conn, tx, 50, "Split")
+
+
+def test_unsplit_uses_saved_amount_and_preserves_note(conn) -> None:
+    from joint_expense_tracker.services import split_transaction, unsplit_transaction
+
+    tx = create_manual_transaction(conn, "2026-09-12", "Dinner", 100, note="Birthday")
+    rest = split_transaction(conn, tx, 70, "Joint", tip_amount=20)
+    unsplit_transaction(conn, tx, rest, tip_amount=999)
+    row = conn.execute("SELECT amount, note, status FROM transactions WHERE id = ?", (tx,)).fetchone()
+    assert tuple(row) == (100, "Birthday", "Review")
+    assert conn.execute("SELECT COUNT(*) FROM split_undo").fetchone()[0] == 0
+
+
+def test_unsplit_rejects_changed_split_pieces(conn) -> None:
+    import pytest
+
+    from joint_expense_tracker.services import split_transaction, unsplit_transaction
+
+    for piece in ("part", "rest"):
+        tx = create_manual_transaction(conn, "2026-09-12", "Dinner", 100)
+        rest = split_transaction(conn, tx, 70, "Joint")
+        changed = tx if piece == "part" else rest
+        conn.execute("UPDATE transactions SET note = 'Edited later' WHERE id = ?", (changed,))
+        before = [tuple(r) for r in conn.execute("SELECT * FROM transactions ORDER BY id")]
+        with pytest.raises(ValueError, match="can't be undone"):
+            unsplit_transaction(conn, tx, rest)
+        assert [tuple(r) for r in conn.execute("SELECT * FROM transactions ORDER BY id")] == before

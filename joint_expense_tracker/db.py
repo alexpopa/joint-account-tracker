@@ -101,8 +101,21 @@ TRANSACTION_COLUMNS = [
     "subcategory",
 ]
 
+SPLIT_UNDO_TABLE = """
+CREATE TABLE IF NOT EXISTS split_undo (
+    rest_id INTEGER PRIMARY KEY REFERENCES transactions(id) ON DELETE CASCADE,
+    transaction_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+    original_amount REAL NOT NULL,
+    original_note TEXT,
+    part_snapshot TEXT NOT NULL,
+    rest_snapshot TEXT NOT NULL,
+    CHECK (transaction_id != rest_id)
+);
+"""
+
 SCHEMA = (
     TRANSACTIONS_TABLE.format(name="transactions")
+    + SPLIT_UNDO_TABLE
     + """
 CREATE TABLE IF NOT EXISTS accounts (
     id INTEGER PRIMARY KEY,
@@ -280,6 +293,11 @@ def _migration_settle_existing_refunds(conn: sqlite3.Connection) -> None:
         pair_refund(conn, row["id"])
 
 
+def _migration_split_undo(conn: sqlite3.Connection) -> None:
+    """Record new split pairs; old rows cannot safely be inferred from notes or dates."""
+    conn.execute(SPLIT_UNDO_TABLE)
+
+
 # Each migration runs once, in order; PRAGMA user_version records how many have run.
 # Append new migrations to the end. Never edit or reorder ones that have shipped.
 MIGRATIONS = [
@@ -288,6 +306,7 @@ MIGRATIONS = [
     _migration_dedupe_by_guid,
     _migration_plain_status_names,
     _migration_settle_existing_refunds,
+    _migration_split_undo,
 ]
 
 

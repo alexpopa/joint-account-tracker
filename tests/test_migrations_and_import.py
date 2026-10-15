@@ -272,3 +272,21 @@ def test_import_from_messages_pairs_refunds_in_the_same_batch(tmp_path) -> None:
     with get_db() as conn:
         statuses = [r["status"] for r in conn.execute("SELECT status FROM transactions ORDER BY transaction_datetime")]
     assert statuses == ["Ignored", "Ignored"]
+
+
+def test_split_undo_migration_preserves_existing_rows(tmp_path) -> None:
+    path = tmp_path / "before-split-undo.sqlite"
+    init_db(path)
+    with get_db(path) as conn:
+        from joint_expense_tracker.services import create_manual_transaction
+
+        create_manual_transaction(conn, "2026-09-12", "Dinner", 100, note="Split $100.00 of $150.00")
+        before = [tuple(r) for r in conn.execute("SELECT * FROM transactions")]
+        conn.execute("DROP TABLE split_undo")
+        conn.execute(f"PRAGMA user_version = {len(MIGRATIONS) - 1}")
+    init_db(path)
+    init_db(path)
+    with get_db(path) as conn:
+        assert [tuple(r) for r in conn.execute("SELECT * FROM transactions")] == before
+        assert conn.execute("SELECT COUNT(*) FROM split_undo").fetchone()[0] == 0
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == len(MIGRATIONS)
