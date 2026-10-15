@@ -103,8 +103,6 @@ def test_quick_classify_with_category_via_form(client) -> None:
     assert tuple(row) == ("Joint", "Groceries", 50)
 
 
-
-
 def test_failed_import_is_shown_on_dashboard(client) -> None:
     from joint_expense_tracker import config
 
@@ -114,3 +112,9 @@ def test_failed_import_is_shown_on_dashboard(client) -> None:
     page = client.post("/import").text
     assert "Last import failed" in page and "Messages DB path" in page
 
+
+def test_return_to_cannot_leave_the_site(client) -> None:
+    response = client.post(
+        "/transactions/1/classify", data={"status": "Joint", "return_to": "//evil.example"}, follow_redirects=False
+    )
+    assert response.headers["location"] == "/"

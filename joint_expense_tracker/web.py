@@ -54,7 +54,8 @@ def render(request: Request, name: str, context: dict[str, Any]):
 
 
 def redirect(path: str) -> RedirectResponse:
-    return RedirectResponse(path, status_code=303)
+    # Only follow same-site paths from form fields like return_to.
+    return RedirectResponse(path if path.startswith("/") and not path.startswith("//") else "/", status_code=303)
 
 
 def optional_float(value: str | float | None, field_name: str) -> float | None:
