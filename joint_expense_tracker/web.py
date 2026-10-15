@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi import FastAPI, Form, Header, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -17,6 +17,7 @@ from .config import (
     DATA_DIR,
     DEFAULT_CHASE_KEYWORDS,
     DEFAULT_CHASE_SENDERS,
+    REVIEW_CHOICES,
     STATUSES,
 )
 from .db import categories, delete_category, get_db, init_db, rows_to_dicts, save_category, set_setting, utc_now
@@ -26,8 +27,13 @@ from .services import (
     create_manual_transaction,
     dashboard_data,
     export_month,
+    months,
+    normalize_month,
     resolve_status,
+    review_count,
     spending_data,
+    split_transaction,
+    unsplit_transaction,
     update_transaction,
 )
 
@@ -45,11 +51,34 @@ app = FastAPI(title="Joint Expense Tracker", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 templates.env.filters["money"] = lambda value: f"${float(value or 0):,.2f}"
+templates.env.filters["month_name"] = lambda value, fmt="%B %Y": datetime.strptime(value, "%Y-%m").strftime(fmt)
+# "2026-09-30T21:30:00-04:00" -> "Wed, Sep 30"
+templates.env.filters["day"] = lambda value: datetime.strptime(str(value)[:10], "%Y-%m-%d").strftime("%a, %b %-d")
 templates.env.globals["categorized_statuses"] = sorted(CATEGORIZED_STATUSES)
+templates.env.globals["review_choices"] = REVIEW_CHOICES
+
+NAV_ITEMS = [
+    ("/", "Dashboard", "home"),
+    ("/spending", "Spending", "pie"),
+    ("/transactions", "Transactions", "list"),
+    ("/accounts", "Accounts", "card"),
+    ("/rules", "Rules", "zap"),
+    ("/settings", "Settings", "sliders"),
+]
 
 
 def render(request: Request, name: str, context: dict[str, Any]):
-    return templates.TemplateResponse(request, name, context)
+    # The top bar links to what's left to review in the newest month, like the Dashboard's default view.
+    with get_db() as conn:
+        latest = months(conn)
+        nav_review_count = review_count(conn, latest[0]) if latest else 0
+    path = request.url.path
+    active = next((href for href, _, _ in NAV_ITEMS[1:] if path.startswith(href)), "/" if path == "/" else None)
+    return templates.TemplateResponse(
+        request,
+        name,
+        {"nav_items": NAV_ITEMS, "nav_active": active, "nav_review_count": nav_review_count, **context},
+    )
 
 
 def redirect(path: str) -> RedirectResponse:
@@ -74,8 +103,14 @@ def optional_float(value: str | float | None, field_name: str) -> float | None:
 def dashboard(request: Request, month: str | None = None):
     with get_db() as conn:
         data = dashboard_data(conn, month)
-        data["categories"] = categories(conn)
     return render(request, "dashboard.html", data)
+
+
+@app.get("/review")
+def review(month: str | None = None):
+    # Review used to be its own page; it now lives on the Dashboard.
+    month = normalize_month(month)
+    return redirect(f"/?month={month}#review" if month else "/#review")
 
 
 @app.get("/spending")
@@ -219,19 +254,45 @@ def classify(
     tip_percent: str | None = Form(None),
     tip_amount: str | None = Form(None),
     category: str | None = Form(None),
+    split_amount: str | None = Form(None),
     return_to: str = Form("/transactions"),
+    accept: str = Header(""),
 ):
+    # With split_amount, that much is tagged `status` and the rest becomes a new Review row.
+    split = optional_float(split_amount, "split_amount")
+    rest_id = None
     with get_db() as conn:
-        classify_transaction(
-            conn,
-            transaction_id,
-            status,
-            optional_float(joint_amount, "joint_amount"),
-            optional_float(tip_percent, "tip_percent"),
-            optional_float(tip_amount, "tip_amount"),
-            category,
-        )
+        if split:
+            try:
+                rest_id = split_transaction(
+                    conn, transaction_id, split, status, category, optional_float(tip_amount, "tip_amount")
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+        else:
+            classify_transaction(
+                conn,
+                transaction_id,
+                status,
+                optional_float(joint_amount, "joint_amount"),
+                optional_float(tip_percent, "tip_percent"),
+                optional_float(tip_amount, "tip_amount"),
+                category,
+            )
+    # The Dashboard's review cards post with fetch and need the new row's id for Undo.
+    if "application/json" in accept:
+        return {"ok": True, "rest_id": rest_id}
     return redirect(return_to)
+
+
+@app.post("/transactions/{transaction_id}/unsplit")
+def unsplit(transaction_id: int, rest_id: int = Form(...), tip_amount: str | None = Form(None)):
+    with get_db() as conn:
+        try:
+            unsplit_transaction(conn, transaction_id, rest_id, optional_float(tip_amount, "tip_amount"))
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"ok": True}
 
 
 @app.get("/transactions/{transaction_id}/edit")

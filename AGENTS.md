@@ -94,8 +94,8 @@ joint_expense_tracker/
   services.py   Transaction writes, refund pairing, dashboard + spending aggregation, CSV export
   charts.py     Geometry for the server-rendered SVG trend chart
   web.py        FastAPI routes; Jinja templates; plain HTML forms with POST → 303 redirect
-  templates/    Pages, plus partials: quick_classify.html, category_input.html, category_script.html
-  static/       styles.css (chart colors are the --series-* tokens)
+  templates/    Pages, plus partials: icons.html, month_switcher.html, category_input.html, category_script.html
+  static/       styles.css (theme tokens on :root / [data-theme="dark"]; status colors --s-*; chart --series-*)
 tests/          pytest suite; conftest.py isolates all data in a temp dir
 launchd/        LaunchAgent plist that keeps the web app running on login
 ```
@@ -227,6 +227,25 @@ uv run --no-project --with playwright python your_script.py   # chromium.launch(
 Headless Chrome's `--window-size` can't go narrower than about 500px, so use
 Playwright device emulation (e.g. `p.devices["iPhone 13"]`) for phone layouts.
 Check both desktop and phone widths after UI changes.
+
+## UI notes
+
+- Mobile first: the owner mostly uses a phone. Check iPhone width first, then desktop.
+- Dark is the default theme. `base.html` sets `data-theme` before paint from
+  `localStorage.theme` (`dark` | `light` | `auto`). Use the CSS tokens and never
+  hard-code colors. Give status-colored elements `data-status="<Status>"`; that sets `--c`.
+- The menu (`#menu`) and bottom sheets (`.sheet`) use the HTML `popover` attribute, so
+  they open without JS.
+- Review cards live on the Dashboard (`#review`). `/review` only redirects there.
+  Each card is one form: tip and split boxes, then one swipeable row of status
+  buttons, then one swipeable row of categories. Whichever button is tapped sends the
+  tip, split, and category with it. With JS the card posts to the
+  classify route with `fetch` (`Accept: application/json` returns `rest_id` for splits)
+  and slides away. Undo posts `status=Review`, or `/unsplit` after a split. Without JS
+  it's a plain POST → 303.
+- Keep the UI free of explanatory text: no hints under buttons and no page blurbs.
+  This app has one user who knows what everything means.
+- `render()` in `web.py` adds the menu items and the review count (top-bar chip) to every page.
 
 ## Conventions
 

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "month_switcher.html" import month_switcher %}
 {% block title %}Spending · Joint Expense Tracker{% endblock %}
 {% macro delta(current, previous) -%}
   {%- if previous is not none and (current or previous) -%}
@@ -26,17 +27,9 @@
 <section class="page-head">
   <div>
     <p class="eyebrow">Spending</p>
-    <h1>{{ selected_label }}</h1>
-    <p>Where the money went: shared spending vs. your own.</p>
+    <h1 class="visually-hidden">{{ selected_label }}</h1>
   </div>
-  <form class="actions" method="get" action="/spending">
-    <select name="month" aria-label="Month">
-      {% for month in months %}<option value="{{ month }}" {% if month == selected_month %}selected{% endif %}>{{ month }}</option>{% endfor %}
-      {% if not months %}<option value="{{ selected_month }}">{{ selected_month }}</option>{% endif %}
-    </select>
-    {% if category %}<input type="hidden" name="category" value="{{ category }}">{% endif %}
-    <button>View</button>
-  </form>
+  {{ month_switcher("/spending", months, selected_month, {"category": category}) }}
 </section>
 
 <section class="spend-tiles" aria-label="Totals for {{ selected_label }}">
@@ -53,7 +46,6 @@
   <div class="spend-tile muted-tile">
     <span class="tile-label">Paid for her (Venmo)</span>
     <strong>{{ totals.venmo|money }}</strong>
-    <span class="delta">Paid back, so not counted as spending</span>
   </div>
 </section>
 
@@ -85,7 +77,7 @@
   <div class="trend-head">
     <div>
       <h2>{% if category %}{{ category }} · {% endif %}Last 12 months</h2>
-      <p>{% if category %}Only {{ category }} spending. <a href="/spending?month={{ selected_month }}">Show all spending</a>{% else %}Click a category above to see its trend.{% endif %}</p>
+      <p>{% if category %}<a href="/spending?month={{ selected_month }}">Show all</a>{% endif %}</p>
     </div>
     <p class="legend"><span><i class="key key-joint"></i>Joint</span><span><i class="key key-personal"></i>Personal</span></p>
   </div>

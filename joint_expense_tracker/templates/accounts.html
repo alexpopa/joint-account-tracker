@@ -1,15 +1,26 @@
 {% extends "base.html" %}
+{% block title %}Accounts · Joint Expense Tracker{% endblock %}
 {% block content %}
-<section class="page-head"><div><h1>Accounts</h1><p>Map card endings to friendly names.</p></div></section>
-<form class="inline-create" method="post">
-  <input name="card_last4" maxlength="4" placeholder="1234" required>
-  <input name="account_name" placeholder="Chase Sapphire Preferred" required>
-  <select name="active"><option value="1">Active</option><option value="0">Inactive</option></select>
-  <button>Save Account</button>
+<section class="page-head">
+  <div><p class="eyebrow">Accounts</p><h1>Cards</h1></div>
+</section>
+<ul class="list-card">
+  {% for acct in accounts %}
+  <li><div>
+    <span class="list-main">{{ acct.account_name }} <span class="muted">•• {{ acct.card_last4 }}</span></span>
+    {% if not acct.active %}<span class="status-tag" data-status="Ignored">Inactive</span>{% endif %}
+  </div></li>
+  {% else %}
+  <li class="empty">No cards yet.</li>
+  {% endfor %}
+</ul>
+<h2>Add or rename a card</h2>
+<form class="form-card" method="post">
+  <div class="field-pair">
+    <label>Last 4 <input name="card_last4" maxlength="4" inputmode="numeric" placeholder="1234" required></label>
+    <label>Status <select name="active"><option value="1">Active</option><option value="0">Inactive</option></select></label>
+  </div>
+  <label>Name <input name="account_name" placeholder="Chase Sapphire Preferred" required></label>
+  <button>Save card</button>
 </form>
-<div class="table-wrap">
-  <table><thead><tr><th>Last4</th><th>Name</th><th>Active</th></tr></thead><tbody>
-  {% for acct in accounts %}<tr><td>{{ acct.card_last4 }}</td><td>{{ acct.account_name }}</td><td>{{ "Yes" if acct.active else "No" }}</td></tr>{% else %}<tr><td colspan="3">No accounts mapped yet.</td></tr>{% endfor %}
-  </tbody></table>
-</div>
 {% endblock %}

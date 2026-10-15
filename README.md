@@ -111,8 +111,8 @@ sets both in one click, and the Dashboard shows the Present total on its own.
 
 Joint, Split, and Personal purchases can have a category (Groceries, Dining, Video
 games, ...). That powers the **Spending** page: "we spent $X on groceries from the joint
-account," "I spent $Y on video games." Pick a category from the dropdown next to the
-classify buttons, on the Edit page, or with a rule. Add or delete categories in
+account," "I spent $Y on video games." Pick a category on a review card, on the Edit
+page, or with a rule. Add or delete categories in
 Settings. Deleting one removes it from any transactions and rules that use it.
 
 ## Spending page
@@ -126,15 +126,27 @@ For any month, Spending shows:
 
 ## Workflow
 
-1. Import alerts (Dashboard → Import New Messages). The Dashboard shows the result of
-   the last import, including what to do if it failed.
+1. Import alerts (Dashboard → Import). The Dashboard shows the result of the last
+   import, including what to do if it failed.
 2. New purchases start in Review unless a rule classifies them.
 3. Map card last4 values to friendly names on Accounts.
-4. Classify each purchase. For restaurants, enter the tip before clicking Joint,
-   Personal, or Venmo. Pick a category if you like.
-5. For Split, enter the joint portion.
-6. Add any purchase that didn't send an alert with **+ Add transaction** on Transactions.
-7. Check the Dashboard totals, move the money, and look at Spending.
+4. Tag purchases at the top of the Dashboard. Each one waiting for review is a card.
+   Type a tip if there is one, pick a category if you want, then tap Joint, Personal,
+   Present, Venmo, or Ignored. If you tagged that merchant before, its usual button
+   comes first, marked ↺. Every tag can be undone from the message at the bottom.
+
+   **Splitting:** type an amount in the Split box and tap a button. That amount gets
+   that tag, and the rest becomes a new card to tag on its own. The tip is added to
+   the total first. Example: $100 dinner, $20 tip, Split 70, tap Joint → $70 Joint and
+   a new $50 card. Tag that one Personal, Venmo, or anything else.
+   Split Undo only rejoins the recorded pair, provided neither piece has changed.
+   It restores the original purchase amount and note. Splits made before this
+   safeguard was added must be corrected manually.
+5. Add any purchase that didn't send an alert with **Add** on Transactions.
+6. Check the Dashboard totals (tap one to copy it), move the money, and look at Spending.
+
+The app is dark by default. Switch to Light or Auto (follow the phone) at the bottom of
+the menu. On iPhone, Safari → Share → Add to Home Screen makes it open like an app.
 
 ### Refunds
 

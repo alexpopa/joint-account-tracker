@@ -1,28 +1,36 @@
 <script>
-  // Show the category picker only for statuses that carry a category, and swap in a
-  // text box when "+ New category…" is chosen.
+  // Show the category picker only for statuses that carry a category, swap in a text box
+  // when "+ New category…" is chosen, and show [data-split-only] fields only for Split.
+  // The status can be a <select> or a group of radio buttons.
   const categorizedStatuses = {{ categorized_statuses|tojson }};
-  document.querySelectorAll('[data-category-field]').forEach((container) => {
-    const form = container.closest('form');
-    const status = form.querySelector('select[name="status"], select[name="default_status"]');
-    const select = container.querySelector('[data-category-select]');
-    const newLabel = container.querySelector('[data-new-category-label]');
-    const newInput = container.querySelector('[data-new-category-input]');
+  const statusOf = (form) => (form.elements.status || form.elements.default_status || {}).value;
+  document.querySelectorAll("form").forEach((form) => {
+    const splitOnly = form.querySelectorAll("[data-split-only]");
+    if (!splitOnly.length) return;
+    const update = () => splitOnly.forEach((el) => { el.hidden = statusOf(form) !== "Split"; });
+    form.addEventListener("change", update);
+    update();
+  });
+  document.querySelectorAll("[data-category-field]").forEach((container) => {
+    const form = container.closest("form");
+    const hasStatus = Boolean(form.elements.status || form.elements.default_status);
+    const select = container.querySelector("[data-category-select]");
+    const newLabel = container.querySelector("[data-new-category-label]");
+    const newInput = container.querySelector("[data-new-category-input]");
     const update = () => {
-      const applies = !status || categorizedStatuses.includes(status.value);
-      const adding = select.selectedOptions[0].hasAttribute('data-new-category');
+      const applies = !hasStatus || categorizedStatuses.includes(statusOf(form));
+      const adding = select.selectedOptions[0].hasAttribute("data-new-category");
       container.hidden = !applies;
       select.disabled = !applies;
-      select.name = adding ? '' : 'category';
+      select.name = adding ? "" : "category";
       newLabel.hidden = !adding;
-      newInput.name = adding ? 'category' : '';
+      newInput.name = adding ? "category" : "";
       newInput.disabled = !applies || !adding;
       newInput.required = applies && adding;
     };
-    if (status) status.addEventListener('change', update);
-    select.addEventListener('change', () => {
+    form.addEventListener("change", (event) => {
       update();
-      if (!newInput.disabled) newInput.focus();
+      if (event.target === select && !newInput.disabled) newInput.focus();
     });
     update();
   });

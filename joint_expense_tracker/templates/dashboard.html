@@ -1,119 +1,269 @@
 {% extends "base.html" %}
+{% from "icons.html" import icon %}
+{% from "month_switcher.html" import month_switcher %}
 {% block content %}
-<section class="page-head">
-  <div>
-    <h1>Dashboard</h1>
-    <p>Selected month: {{ selected_month }}</p>
+<section class="page-head review-page-head">
+  <div class="review-head">
+    <h1 data-review-heading>{% if needs_review %}<span data-review-count>{{ needs_review_count }}</span> to tag{% else %}All tagged{% endif %}</h1>
+    {% if needs_review_count > needs_review|length %}<a href="/transactions?month={{ selected_month }}&status=Review">All {{ needs_review_count }}</a>{% endif %}
   </div>
-  <form class="actions" method="get" action="/">
-    <select name="month" aria-label="Month">
-      {% for month in months %}
-      <option value="{{ month }}" {% if month == selected_month %}selected{% endif %}>{{ month }}</option>
-      {% endfor %}
-      {% if not months %}<option value="{{ selected_month }}">{{ selected_month }}</option>{% endif %}
-    </select>
-    <button>View</button>
-  </form>
+  {{ month_switcher("/", months, selected_month) }}
 </section>
 
-{% if last_import %}
-  {% if last_import.error %}
-  <p class="notice notice-error" role="alert"><strong>Last import failed.</strong> {{ last_import.error }} <a href="/diagnostics">Run diagnostics</a></p>
-  {% else %}
-  <p class="import-status">Last import {{ last_import.finished_at[:16]|replace("T", " ") }} UTC · {{ last_import.messages_imported }} new transaction{{ "" if last_import.messages_imported == 1 else "s" }}</p>
-  {% endif %}
+{% if last_import and last_import.error %}
+<p class="notice notice-error" role="alert"><strong>Last import failed.</strong> {{ last_import.error }} <a href="/diagnostics">Run diagnostics</a></p>
 {% endif %}
 
-<section class="metrics">
-  <div class="metric">
-    <span>Total joint reimbursement</span>
-    <strong>{{ total_joint|money }}</strong>
-  </div>
-  <div class="metric">
-    <span>Total to request via Venmo</span>
-    <strong>{{ total_venmo|money }}</strong>
-  </div>
-  <div class="metric">
-    <span>Total personal spending</span>
-    <strong>{{ total_personal|money }}</strong>
-  </div>
-  <div class="metric">
-    <span>Total present spending</span>
-    <strong>{{ total_present|money }}</strong>
-  </div>
-  <div class="metric">
-    <span>Needs review</span>
-    <strong>{{ needs_review_count }}</strong>
-  </div>
-  <form method="post" action="/import" class="metric action-metric">
-    <button>Import New Messages</button>
+<section class="review" id="review">
+  {% for tx in needs_review %}
+  {% set suggestion = tx.suggestion %}
+  <form class="review-card" method="post" action="/transactions/{{ tx.id }}/classify" data-merchant="{{ tx.merchant }}" data-amount="{{ tx.amount }}">
+    <input type="hidden" name="return_to" value="/?month={{ selected_month }}#review">
+    <div class="review-top">
+      <div class="review-what">
+        <h2 class="merchant">{{ tx.merchant }}</h2>
+        <p class="meta">{{ tx.transaction_datetime|day }} · {{ tx.account_name or tx.card_last4 or "Unknown card" }}</p>
+        {% if tx.note %}<p class="row-note">{{ tx.note }}</p>{% endif %}
+      </div>
+      <div class="review-side">
+        <strong class="amount">{{ tx.amount|money }}</strong>
+        <a class="edit-link" href="/transactions/{{ tx.id }}/edit" aria-label="Edit">{{ icon("edit", 15) }}</a>
+      </div>
+    </div>
+
+    <div class="amount-fields">
+      <label>Tip <span class="money-input"><input name="tip_amount" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00"></span></label>
+      <label>Split <span class="money-input"><input name="split_amount" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00"></span></label>
+    </div>
+
+    {# "Last time": with a category it's its own button; without one, the matching button moves to the front. #}
+    {% set suggested = suggestion.status if suggestion and not suggestion.category else none %}
+    <div class="scroll-row">
+      {% if suggestion and suggestion.category %}
+      <button class="choice suggestion" name="status" value="{{ suggestion.status }}" data-status="{{ suggestion.status }}" data-category="{{ suggestion.category }}" aria-label="Same as last time: {{ suggestion.status }}, {{ suggestion.category }}">
+        {{ icon("repeat", 15) }}{{ suggestion.status }} · {{ suggestion.category }}
+      </button>
+      {% endif %}
+      {% for choice in ([suggested] if suggested else []) + review_choices|reject("equalto", suggested)|list %}
+      <button class="choice{% if choice == suggested %} suggested{% endif %}" name="status" value="{{ choice }}" data-status="{{ choice }}"{% if choice == suggested %} aria-label="{{ choice }} (same as last time)"{% endif %}>
+        {% if choice == suggested %}{{ icon("repeat", 15) }}{% endif %}{{ choice }}
+      </button>
+      {% endfor %}
+    </div>
+
+    <div class="scroll-row" role="radiogroup" aria-label="Category">
+      {% for name in categories %}
+      <label class="chip"><input type="radio" name="category" value="{{ name }}"><span>{{ name }}</span></label>
+      {% endfor %}
+      <input class="chip-input" data-new-category maxlength="80" placeholder="+ New" aria-label="New category">
+    </div>
   </form>
-  <a class="metric action-metric" href="/export?month={{ selected_month }}">Export CSV</a>
-  <a class="metric action-metric" href="/spending?month={{ selected_month }}">See spending</a>
+  {% endfor %}
 </section>
+
+<section class="hero" aria-label="Money to move for {{ selected_month|month_name }}">
+  <div class="hero-row">
+    <span class="hero-label"><i class="dot" data-status="Joint"></i>Pull from joint</span>
+    <button type="button" class="hero-amount" data-copy="{{ '%.2f'|format(total_joint) }}" aria-label="Copy {{ total_joint|money }}">{{ total_joint|money }}</button>
+  </div>
+  <div class="hero-row">
+    <span class="hero-label"><i class="dot" data-status="Venmo"></i>Venmo request</span>
+    <button type="button" class="hero-amount small" data-copy="{{ '%.2f'|format(total_venmo) }}" aria-label="Copy {{ total_venmo|money }}">{{ total_venmo|money }}</button>
+  </div>
+</section>
+
+<section class="stat-row">
+  <a class="stat" href="/spending?month={{ selected_month }}">
+    <span><i class="dot" data-status="Personal"></i>Personal</span>
+    <strong>{{ total_personal|money }}</strong>
+  </a>
+  <a class="stat" href="/spending?month={{ selected_month }}&category=Present">
+    <span><i class="dot" data-status="Present"></i>Presents</span>
+    <strong>{{ total_present|money }}</strong>
+  </a>
+</section>
+
+<section class="quick-actions">
+  <form method="post" action="/import"><button class="action">{{ icon("refresh", 18) }}<span>Import</span></button></form>
+  <a class="action" href="/spending?month={{ selected_month }}">{{ icon("pie", 18) }}<span>Spending</span></a>
+  <a class="action" href="/export?month={{ selected_month }}">{{ icon("download", 18) }}<span>Export</span></a>
+</section>
+{% if last_import and not last_import.error %}
+<p class="import-status">Last import {{ last_import.finished_at[:16]|replace("T", " ") }} UTC · {{ last_import.messages_imported }} new</p>
+{% endif %}
 
 <section class="grid-two">
   <div>
-    <h2>By Card/Account</h2>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Account</th><th class="money">Joint Total</th></tr></thead>
-        <tbody>
-          {% for row in totals_by_account %}
-          <tr><td>{{ row.label }}</td><td class="money">{{ row.total|money }}</td></tr>
-          {% else %}
-          <tr><td colspan="2">No transactions yet.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
+    <h2>By status</h2>
+    <ul class="list-card">
+      {% for row in totals_by_status %}
+      <li>
+        <a href="/transactions?month={{ selected_month }}&status={{ row.status }}">
+          <span class="list-main"><i class="dot" data-status="{{ row.status }}"></i>{{ row.status }} <span class="muted">· {{ row.count }}</span></span>
+          <span class="money">{{ row.total|money }}</span>
+        </a>
+      </li>
+      {% else %}
+      <li class="empty">Nothing yet.</li>
+      {% endfor %}
+    </ul>
   </div>
   <div>
-    <h2>By Status</h2>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Status</th><th>Count</th><th class="money">Total</th></tr></thead>
-        <tbody>
-          {% for row in totals_by_status %}
-          <tr><td>{{ row.status }}</td><td>{{ row.count }}</td><td class="money">{{ row.total|money }}</td></tr>
-          {% else %}
-          <tr><td colspan="3">No status totals yet.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
+    <h2>Joint by card</h2>
+    <ul class="list-card">
+      {% for row in totals_by_account %}
+      <li><div><span class="list-main">{{ row.label }}</span><span class="money">{{ row.total|money }}</span></div></li>
+      {% else %}
+      <li class="empty">Nothing yet.</li>
+      {% endfor %}
+    </ul>
   </div>
 </section>
+{% endblock %}
 
-<section>
-  <h2>Needs Review</h2>
-  {% if needs_review_count > needs_review_display_count %}
-  <p class="section-note">
-    Showing latest {{ needs_review_display_count }} of {{ needs_review_count }}.
-    <a href="/transactions?month={{ selected_month }}&status=Review">View all</a>
-  </p>
-  {% endif %}
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Date</th><th>Merchant</th><th class="money">Amount</th><th>Card</th><th>Actions</th></tr></thead>
-      <tbody>
-        {% for tx in needs_review %}
-        <tr>
-          <td>{{ tx.transaction_datetime[:10] }}</td>
-          <td>{{ tx.merchant }}{% if tx.note %}<div class="row-note">{{ tx.note }}</div>{% endif %}</td>
-          <td class="money">{{ tx.amount|money }}</td>
-          <td>{{ tx.account_name or tx.card_last4 or "Unknown" }}</td>
-          <td><div class="row-actions">
-            {% with return_to="/?month=" ~ selected_month, category_value="" %}{% include "quick_classify.html" %}{% endwith %}
-            <a href="/transactions/{{ tx.id }}/edit">Edit</a>
-          </div></td>
-        </tr>
-        {% else %}
-        <tr><td colspan="5">Nothing waiting for review.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
-{% include "category_script.html" %}
+{% block scripts %}
+<script>
+  const toast = document.getElementById("toast");
+  let toastTimer;
+
+  function showToast(text, undo, ms = 6000) {
+    toast.replaceChildren(Object.assign(document.createElement("span"), { textContent: text }));
+    if (undo) {
+      const button = Object.assign(document.createElement("button"), { type: "button", textContent: "Undo" });
+      button.addEventListener("click", undo, { once: true });
+      toast.append(button);
+    }
+    toast.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toast.hidden = true; }, ms);
+  }
+
+  // Tap an amount to copy it. The Clipboard API needs HTTPS, so over plain-HTTP Tailscale fall back to a hidden text box.
+  document.querySelectorAll("[data-copy]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(button.dataset.copy);
+      } catch {
+        const box = Object.assign(document.createElement("textarea"), { value: button.dataset.copy, readOnly: true });
+        box.style.cssText = "position:fixed;opacity:0";
+        document.body.append(box);
+        box.select();
+        const copied = document.execCommand("copy");
+        box.remove();
+        if (!copied) return;
+      }
+      showToast(`Copied ${button.dataset.copy}`, null, 2000);
+    });
+  });
+
+  // Review cards: tag without a page reload, slide the card away, and offer Undo.
+  async function post(url, data) {
+    const response = await fetch(url, {
+      method: "POST",
+      body: new URLSearchParams(data),
+      headers: { Accept: "application/json" },
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.detail || "Couldn't save. Try again.");
+    return body;
+  }
+
+  // A split adds a new card for the rest, so the page reloads; the Undo message survives the reload.
+  function offerUndo(text, undo) {
+    showToast(text, async () => {
+      try {
+        await post(undo.url, undo.data);
+      } catch (error) {
+        return showToast(error.message);
+      }
+      location.reload();
+    });
+  }
+  try {
+    const pending = JSON.parse(sessionStorage.getItem("undo") || "null");
+    sessionStorage.removeItem("undo");
+    if (pending) offerUndo(pending.text, pending.undo);
+  } catch {}
+
+  function removeCard(card) {
+    const done = () => {
+      card.remove();
+      if (document.querySelector(".review-card")) return;
+      if (Number(document.querySelector("[data-review-count]")?.textContent) > 0) return location.reload();
+      document.querySelector("[data-review-heading]").textContent = "All tagged";
+    };
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return done();
+    card.style.height = `${card.offsetHeight}px`;
+    card.classList.add("is-leaving");
+    requestAnimationFrame(() => { card.style.height = "0px"; });
+    card.addEventListener("transitionend", (e) => { if (e.propertyName === "height") done(); });
+  }
+
+  const money = (value) => `$${Number(value).toFixed(2)}`;
+
+  document.querySelectorAll(".review-card").forEach((card) => {
+    const newCategory = card.querySelector("[data-new-category]");
+    const radios = [...card.querySelectorAll('input[name="category"]')];
+
+    // Tapping the selected category again clears it; typing a new one clears the chips.
+    radios.forEach((radio) => {
+      radio.closest(".chip").addEventListener("pointerdown", () => { radio.dataset.wasChecked = radio.checked; });
+      radio.addEventListener("click", () => {
+        if (radio.dataset.wasChecked === "true") radio.checked = false;
+        delete radio.dataset.wasChecked;
+        newCategory.value = "";
+      });
+    });
+    newCategory.addEventListener("input", () => radios.forEach((r) => { r.checked = false; }));
+
+    // The keyboard's Go/Enter key shouldn't tag anything; it just closes the keyboard.
+    card.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && event.target.tagName === "INPUT") {
+        event.preventDefault();
+        event.target.blur();
+      }
+    });
+
+    card.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = event.submitter;
+      const data = new FormData(card, button);
+      if ("category" in button.dataset) data.set("category", button.dataset.category);
+      else if (newCategory.value.trim()) data.set("category", newCategory.value.trim());
+      const status = data.get("status");
+      const tip = Number(data.get("tip_amount") || 0);
+      const split = Number(data.get("split_amount") || 0);
+      const total = Number(card.dataset.amount) + tip;
+      if (split && (split >= total || status === "Ignored")) {
+        card.querySelector('input[name="split_amount"]').focus();
+        return showToast(status === "Ignored" ? "Can't split into Ignored" : `Split must be less than ${money(total)}`, null, 2500);
+      }
+
+      card.classList.add("is-saving");
+      let result;
+      try {
+        result = await post(card.action, data);
+      } catch (error) {
+        card.classList.remove("is-saving");
+        return showToast(error.message);
+      }
+
+      const category = ["Joint", "Personal"].includes(status) ? data.get("category") : "";
+      const label = [status, category].filter(Boolean).join(" · ");
+      if (result.rest_id) {
+        const text = `${money(split)} → ${label} · ${money(total - split)} left to tag`;
+        const undo = { url: card.action.replace("/classify", "/unsplit"), data: { rest_id: result.rest_id, tip_amount: tip || "" } };
+        try { sessionStorage.setItem("undo", JSON.stringify({ text, undo })); } catch {}
+        return location.reload();
+      }
+      document.querySelectorAll("[data-review-count]").forEach((el) => { el.textContent = Math.max(0, Number(el.textContent) - 1); });
+      const tipText = tip && status !== "Ignored" ? `+${money(tip)} tip` : "";
+      offerUndo(`${card.dataset.merchant} → ${[label, tipText].filter(Boolean).join(" · ")}`, {
+        url: card.action,
+        data: { status: "Review", return_to: "/" },
+      });
+      removeCard(card);
+    });
+  });
+</script>
 {% endblock %}

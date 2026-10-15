@@ -60,7 +60,7 @@ def test_chart_geometry() -> None:
 
 
 def test_every_page_renders(client) -> None:
-    for path in ("/", "/spending", "/transactions", "/accounts", "/rules", "/settings", "/healthz"):
+    for path in ("/", "/review", "/spending", "/transactions", "/accounts", "/rules", "/settings", "/healthz"):
         response = client.get(path)
         assert response.status_code == 200, path
     assert client.get("/analytics", follow_redirects=False).headers["location"] == "/spending"
@@ -76,7 +76,7 @@ def test_pages_use_display_labels(client) -> None:
     dashboard = client.get("/?month=2026-09").text
     assert "Venmo" in dashboard and "Present" in dashboard
     assert "Her</td>" not in dashboard and "Wife" not in dashboard
-    assert "<td>Venmo</td>" in client.get("/rules").text
+    assert 'data-status="Venmo">Venmo<' in client.get("/rules").text
 
     spending = client.get("/spending?month=2026-09").text
     assert "Groceries" in spending and "$270.00" in spending
@@ -135,6 +135,16 @@ def test_review_cards_suggest_the_last_tag_per_merchant(conn) -> None:
     assert data["categories"][0] == "Groceries" and "Present" not in data["categories"]
 
 
+def test_dashboard_shows_review_cards(client) -> None:
+    from joint_expense_tracker import config
+
+    with get_db(config.DB_PATH) as conn:
+        seed_month(conn)
+
+    page = client.get("/?month=2026-09").text
+    assert 'data-merchant="Unreviewed"' in page and 'name="tip_amount"' in page
+    assert client.get("/review?month=2026-09", follow_redirects=False).headers["location"] == "/?month=2026-09#review"
+
 
 def test_split_cuts_a_purchase_into_two_rows_that_add_up(conn) -> None:
     from joint_expense_tracker.services import split_transaction, unsplit_transaction
@@ -186,6 +196,52 @@ def test_split_rejects_amounts_outside_the_charge(conn) -> None:
             split_transaction(conn, tx, bad, "Joint")
     with pytest.raises(ValueError):
         split_transaction(conn, tx, 50, "Split")
+
+
+def test_split_from_a_review_card(client) -> None:
+    from joint_expense_tracker import config
+
+    with get_db(config.DB_PATH) as conn:
+        tx = create_manual_transaction(conn, "2026-09-12", "Dinner", 40, status="Review")
+
+    response = client.post(
+        f"/transactions/{tx}/classify",
+        data={"status": "Personal", "split_amount": "15", "tip_amount": "8", "return_to": "/"},
+        headers={"Accept": "application/json"},
+    )
+    rest = response.json()["rest_id"]
+    with get_db(config.DB_PATH) as conn:
+        amounts = dict(
+            conn.execute("SELECT status, amount FROM transactions WHERE id IN (?, ?)", (tx, rest)).fetchall()
+        )
+    assert amounts == {"Personal": 15, "Review": 33}
+
+    too_big = client.post(f"/transactions/{rest}/classify", data={"status": "Joint", "split_amount": "40"})
+    assert too_big.status_code == 422
+    assert client.post(f"/transactions/{tx}/unsplit", data={"rest_id": rest, "tip_amount": "8"}).json() == {"ok": True}
+
+
+def test_unsplit_rejects_unrelated_and_mismatched_purchases(client) -> None:
+    from joint_expense_tracker import config
+    from joint_expense_tracker.services import split_transaction
+
+    with get_db(config.DB_PATH) as conn:
+        first = create_manual_transaction(conn, "2026-09-12", "Dinner", 100, status="Review")
+        second = create_manual_transaction(conn, "2026-09-12", "Dinner", 100, status="Review")
+        # Identical dates, merchants, amounts and alert text still aren't a split.
+        before = [tuple(r) for r in conn.execute("SELECT * FROM transactions ORDER BY id")]
+    for parent, rest in ((first, second), (first, first)):
+        assert client.post(f"/transactions/{parent}/unsplit", data={"rest_id": rest}).status_code == 409
+    with get_db(config.DB_PATH) as conn:
+        assert [tuple(r) for r in conn.execute("SELECT * FROM transactions ORDER BY id")] == before
+        first_rest = split_transaction(conn, first, 40, "Joint")
+        second_rest = split_transaction(conn, second, 40, "Joint")
+        before = [tuple(r) for r in conn.execute("SELECT * FROM transactions ORDER BY id")]
+    assert client.post(f"/transactions/{first}/unsplit", data={"rest_id": second_rest}).status_code == 409
+    with get_db(config.DB_PATH) as conn:
+        assert [tuple(r) for r in conn.execute("SELECT * FROM transactions ORDER BY id")] == before
+    assert client.post(f"/transactions/{first}/unsplit", data={"rest_id": first_rest}).status_code == 200
+    assert client.post(f"/transactions/{first}/unsplit", data={"rest_id": first_rest}).status_code == 409
 
 
 def test_unsplit_uses_saved_amount_and_preserves_note(conn) -> None:

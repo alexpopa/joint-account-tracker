@@ -1,0 +1,25 @@
+{# ‹ October 2026 › — prev/next step through months that have data; the middle is a picker.
+   Usage: {{ month_switcher(action, months, selected_month, extra={"category": category}) }} #}
+{% from "icons.html" import icon %}
+{% macro month_switcher(action, months, selected, extra={}) %}
+{% set index = months.index(selected) if selected in months else -1 %}
+{% set older = months[index + 1] if index >= 0 and index + 1 < months|length else none %}
+{% set newer = months[index - 1] if index > 0 else none %}
+{% set query = namespace(value="") %}
+{% for key, value in extra.items() if value %}{% set query.value = query.value ~ "&" ~ key ~ "=" ~ value|urlencode %}{% endfor %}
+<form class="month-switcher" method="get" action="{{ action }}">
+  {% if older %}<a class="icon-button" href="{{ action }}?month={{ older }}{{ query.value }}" aria-label="Previous month: {{ older|month_name }}">{{ icon("left") }}</a>
+  {% else %}<span class="icon-button" aria-hidden="true" data-disabled>{{ icon("left") }}</span>{% endif %}
+  <label class="month-picker">
+    <span>{{ selected|month_name }}</span>
+    <select name="month" aria-label="Month" onchange="this.form.requestSubmit()">
+      {% for month in months %}<option value="{{ month }}" {% if month == selected %}selected{% endif %}>{{ month|month_name }}</option>{% endfor %}
+      {% if selected not in months %}<option value="{{ selected }}" selected>{{ selected|month_name }}</option>{% endif %}
+    </select>
+  </label>
+  {% for key, value in extra.items() if value %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
+  {% if newer %}<a class="icon-button" href="{{ action }}?month={{ newer }}{{ query.value }}" aria-label="Next month: {{ newer|month_name }}">{{ icon("right") }}</a>
+  {% else %}<span class="icon-button" aria-hidden="true" data-disabled>{{ icon("right") }}</span>{% endif %}
+  <noscript><button>View</button></noscript>
+</form>
+{% endmacro %}

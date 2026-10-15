@@ -1,22 +1,79 @@
+{% from "icons.html" import icon %}
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="dark light">
+    <meta name="theme-color" content="#101315">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Expenses">
     <title>{% block title %}Joint Expense Tracker{% endblock %}</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}?v=5">
+    <script>
+      // Theme: "dark" (default), "light", or "auto" (follow the phone). Runs before paint to avoid a flash.
+      (() => {
+        const media = matchMedia("(prefers-color-scheme: light)");
+        const stored = () => { try { return localStorage.getItem("theme") || "dark"; } catch { return "dark"; } };
+        const apply = () => {
+          const choice = stored();
+          const theme = choice === "auto" ? (media.matches ? "light" : "dark") : choice;
+          document.documentElement.dataset.theme = theme;
+          document.documentElement.dataset.themeChoice = choice;
+          document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme === "light" ? "#f5f6f3" : "#101315");
+          document.querySelectorAll("[data-theme-option]").forEach((b) => b.setAttribute("aria-checked", b.dataset.themeOption === choice));
+        };
+        window.setTheme = (choice) => { try { localStorage.setItem("theme", choice); } catch {} apply(); };
+        media.addEventListener("change", apply);
+        document.addEventListener("DOMContentLoaded", apply);
+        apply();
+      })();
+    </script>
+    <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}?v=6">
   </head>
   <body>
     <header class="topbar">
-      <a class="brand" href="/">Joint Expense Tracker</a>
-      <nav>
-        {% for href, label in [("/", "Dashboard"), ("/spending", "Spending"), ("/transactions", "Transactions"), ("/accounts", "Accounts"), ("/rules", "Rules"), ("/settings", "Settings")] %}
-        <a href="{{ href }}" {% if request.url.path == href %}aria-current="page"{% endif %}>{{ label }}</a>
-        {% endfor %}
-      </nav>
+      <a class="brand" href="/" aria-label="Dashboard">
+        <span class="brand-mark" aria-hidden="true">J</span>
+        <span>Joint Expenses</span>
+      </a>
+      <div class="topbar-actions">
+        {% if nav_review_count and nav_active != "/" %}
+        <a class="review-chip" href="/#review">{{ icon("inbox", 16) }} {{ nav_review_count }}<span class="visually-hidden"> to review</span></a>
+        {% endif %}
+        <button class="icon-button menu-button" popovertarget="menu" aria-label="Menu">{{ icon("menu", 22) }}</button>
+      </div>
     </header>
+
+    <nav id="menu" class="drawer" popover aria-label="Main menu">
+      <div class="drawer-head">
+        <span class="brand"><span class="brand-mark" aria-hidden="true">J</span><span>Joint Expenses</span></span>
+        <button class="icon-button" popovertarget="menu" popovertargetaction="hide" aria-label="Close menu">{{ icon("x", 22) }}</button>
+      </div>
+      <ul class="nav-list">
+        {% for href, label, icon_name in nav_items %}
+        <li>
+          <a href="{{ href }}" {% if nav_active == href %}aria-current="page"{% endif %}>
+            {{ icon(icon_name) }}<span>{{ label }}</span>
+          </a>
+        </li>
+        {% if loop.index == 3 %}<li class="nav-divider" role="separator"></li>{% endif %}
+        {% endfor %}
+      </ul>
+      <div class="drawer-foot">
+        <p class="drawer-label">Appearance</p>
+        <div class="theme-switch" role="radiogroup" aria-label="Appearance">
+          {% for value, label, icon_name in [("dark", "Dark", "moon"), ("light", "Light", "sun"), ("auto", "Auto", "auto")] %}
+          <button type="button" role="radio" data-theme-option="{{ value }}" onclick="setTheme('{{ value }}')">{{ icon(icon_name, 16) }}{{ label }}</button>
+          {% endfor %}
+        </div>
+      </div>
+    </nav>
+
     <main class="shell">
       {% block content %}{% endblock %}
     </main>
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+    {% block scripts %}{% endblock %}
   </body>
 </html>

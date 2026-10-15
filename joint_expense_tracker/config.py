@@ -25,6 +25,8 @@ STATUSES = ["Joint", "Personal", "Venmo", "Split", "Review", "Ignored"]
 # Presents for the partner are Personal spending with this category. "Present" is also
 # accepted as a status shortcut and stored as Personal + Present (see services.resolve_status).
 PRESENT = "Present"
+# Tagging buttons on the Dashboard's review cards, in order.
+REVIEW_CHOICES = ["Joint", "Personal", PRESENT, "Venmo", "Ignored"]
 # Statuses whose spending can carry a category (stored in the `subcategory` column).
 CATEGORIZED_STATUSES = {"Joint", "Split", "Personal"}
 STARTER_CATEGORIES = [

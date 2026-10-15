@@ -1,32 +1,67 @@
 {% extends "base.html" %}
+{% from "icons.html" import icon %}
+{% block title %}Rules · Joint Expense Tracker{% endblock %}
 {% block content %}
-<section class="page-head"><div><h1>Rules</h1><p>Rules classify new imports. Lower priority numbers run first and the first match wins. Joint, Split, and Personal rules can also set a category.</p></div></section>
-<form class="manual-form rule-create" method="post">
-  <label>Match text <input name="match_text" placeholder="e.g. Steam" required></label>
-  <label>Match in <select name="match_field"><option value="merchant_or_raw">Merchant or raw</option><option value="merchant">Merchant</option><option value="raw">Raw text</option></select></label>
-  <label>Status <select name="default_status">{% for status in statuses %}<option value="{{ status }}">{{ status }}</option>{% endfor %}</select></label>
-  {% include "category_input.html" %}
-  <label>Split fraction <input name="default_joint_percent" type="number" step="0.01" min="0" max="1" placeholder="e.g. 0.5 for half"></label>
-  <label>Split amount <input name="default_joint_amount" type="number" step="0.01" min="0" placeholder="Optional"></label>
-  <label>Priority <input name="priority" type="number" value="100"></label>
-  <label>Enabled <select name="active"><option value="1">Active</option><option value="0">Inactive</option></select></label>
-  <div class="actions form-wide"><button>Add Rule</button></div>
-</form>
-<div class="table-wrap">
-  <table><thead><tr><th>Match</th><th>Field</th><th>Status</th><th>Category</th><th>Split</th><th>Priority</th><th>Active</th><th></th></tr></thead><tbody>
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Rules</p>
+    <h1>Auto-tagging</h1>
+  </div>
+  <button class="button add-button" popovertarget="add-rule">{{ icon("plus", 18) }}<span>Add</span></button>
+</section>
+
+<ul class="rule-list">
   {% for rule in rules %}
-  <tr>
-    <td>{{ rule.match_text }}</td>
-    <td>{{ rule.match_field }}</td>
-    <td>{{ rule.default_status }}</td>
-    <td>{% if rule.default_status in categorized_statuses %}<form method="post" action="/rules/{{ rule.id }}/category" class="category-rule-form">{% with category_value=rule.default_subcategory or "", compact=True %}{% include "category_input.html" %}{% endwith %}<button>Save</button></form>{% else %}—{% endif %}</td>
-    <td>{{ rule.default_joint_percent or rule.default_joint_amount or "" }}</td>
-    <td>{{ rule.priority }}</td>
-    <td>{{ "Yes" if rule.active else "No" }}</td>
-    <td><form method="post" action="/rules/{{ rule.id }}/delete"><button class="secondary">Delete</button></form></td>
-  </tr>
-  {% else %}<tr><td colspan="8">No rules configured.</td></tr>{% endfor %}
-  </tbody></table>
+  <li class="rule-card{% if not rule.active %} inactive{% endif %}">
+    <div class="rule-top">
+      <div>
+        <span class="rule-match">“{{ rule.match_text }}”</span>
+        <span class="muted">in {{ {"merchant_or_raw": "merchant or alert", "merchant": "merchant", "raw": "alert text"}.get(rule.match_field, rule.match_field) }}</span>
+      </div>
+      <span class="status-tag" data-status="{{ rule.default_status }}">{{ rule.default_status }}</span>
+    </div>
+    <p class="rule-meta">
+      Priority {{ rule.priority }}
+      {%- if rule.default_joint_percent or rule.default_joint_amount %} · split {{ rule.default_joint_percent or rule.default_joint_amount }}{% endif %}
+      {%- if not rule.active %} · inactive{% endif %}
+    </p>
+    <div class="rule-actions">
+      {% if rule.default_status in categorized_statuses %}
+      <form method="post" action="/rules/{{ rule.id }}/category" class="category-rule-form">
+        {% with category_value=rule.default_subcategory or "", compact=True %}{% include "category_input.html" %}{% endwith %}
+        <button class="secondary">Save</button>
+      </form>
+      {% endif %}
+      <form method="post" action="/rules/{{ rule.id }}/delete" onsubmit="return confirm('Delete this rule?')">
+        <button class="icon-button danger" aria-label="Delete rule">{{ icon("trash", 18) }}</button>
+      </form>
+    </div>
+  </li>
+  {% else %}
+  <li class="empty-state"><h2>No rules yet</h2></li>
+  {% endfor %}
+</ul>
+
+<div id="add-rule" class="sheet" popover>
+  <form class="sheet-form" method="post" action="/rules">
+    <div class="sheet-head">
+      <h2>New rule</h2>
+      <button type="button" class="icon-button" popovertarget="add-rule" popovertargetaction="hide" aria-label="Close">{{ icon("x", 22) }}</button>
+    </div>
+    <label>Contains <input name="match_text" placeholder="e.g. Steam" required></label>
+    <label>In <select name="match_field"><option value="merchant_or_raw">Merchant or alert text</option><option value="merchant">Merchant only</option><option value="raw">Alert text only</option></select></label>
+    <label>Status <select name="default_status">{% for status in statuses %}<option value="{{ status }}">{{ status }}</option>{% endfor %}</select></label>
+    {% include "category_input.html" %}
+    <div class="field-pair" data-split-only>
+      <label>Split fraction <input name="default_joint_percent" type="number" step="0.01" min="0" max="1" placeholder="0.5"></label>
+      <label>or split amount <input name="default_joint_amount" type="number" step="0.01" min="0" placeholder="0.00"></label>
+    </div>
+    <div class="field-pair">
+      <label>Priority <input name="priority" type="number" value="100"></label>
+      <label>Enabled <select name="active"><option value="1">Active</option><option value="0">Inactive</option></select></label>
+    </div>
+    <button class="button-block">Add rule</button>
+  </form>
 </div>
-{% include "category_script.html" %}
 {% endblock %}
+{% block scripts %}{% include "category_script.html" %}{% endblock %}

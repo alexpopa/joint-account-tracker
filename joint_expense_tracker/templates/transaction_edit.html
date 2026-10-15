@@ -1,68 +1,90 @@
 {% extends "base.html" %}
+{% from "icons.html" import icon %}
+{% block title %}{{ transaction.merchant }} · Joint Expense Tracker{% endblock %}
 {% block content %}
-<section class="page-head"><div><h1>Edit Transaction</h1><p>{{ transaction.transaction_datetime }}</p></div></section>
+<a class="back-link" href="/transactions">{{ icon("left", 18) }} Transactions</a>
+<section class="edit-hero">
+  <p class="eyebrow">{{ transaction.transaction_datetime|day }} · {{ transaction.transaction_datetime[:4] }}</p>
+  <h1>{{ transaction.merchant }}</h1>
+  <p class="edit-amount">{{ transaction.amount|money }}</p>
+</section>
+
 <form class="edit-form" method="post" data-amount="{{ transaction.amount }}">
-  <label>Merchant <input name="merchant" value="{{ transaction.merchant }}"></label>
-  <label>Card/account name <input name="account_name" value="{{ transaction.account_name or '' }}" placeholder="Chase Sapphire Preferred Visa"></label>
-  <input type="hidden" name="card_last4" value="{{ transaction.card_last4 or '' }}">
-  <label>Status
-    <select name="status">{% for status in statuses %}<option value="{{ status }}" {% if transaction.status == status %}selected{% endif %}>{{ status }}</option>{% endfor %}</select>
-  </label>
-  {% set category_value = transaction.subcategory or '' %}
-  {% include "category_input.html" %}
-  <label>Original amount <input readonly value="${{ '%.2f'|format(transaction.amount) }}"></label>
-  <label>Tip percent <input id="tip_percent" name="tip_percent" type="number" inputmode="decimal" step="0.01" min="0" max="100" value="{{ transaction.tip_percent or '' }}"></label>
-  <label>Tip amount <input id="tip_amount" name="tip_amount" type="number" inputmode="decimal" step="0.01" min="0" value="{{ '%.2f'|format(transaction.tip_amount or 0) if transaction.tip_amount else '' }}"></label>
-  <label>Joint amount <input name="joint_amount" type="number" step="0.01" min="0" value="{{ transaction.joint_amount }}"></label>
-  <label>Note <input name="note" value="{{ transaction.note or '' }}"></label>
-  <label>Raw text <textarea readonly>{{ transaction.raw_text }}</textarea></label>
-  <div class="actions"><button>Save</button><a href="/transactions">Cancel</a></div>
+  <fieldset class="status-picker">
+    <legend class="visually-hidden">Status</legend>
+    {% for status in statuses %}
+    <label class="status-option" data-status="{{ status }}">
+      <input type="radio" name="status" value="{{ status }}" {% if transaction.status == status %}checked{% endif %}>
+      <span class="status-option-label"><i class="dot" data-status="{{ status }}"></i>{{ status }}</span>
+    </label>
+    {% endfor %}
+  </fieldset>
+
+  <div class="form-card">
+    {% set category_value = transaction.subcategory or '' %}
+    {% include "category_input.html" %}
+    <label data-split-only>Joint part
+      <span class="money-input"><input name="joint_amount" type="number" inputmode="decimal" step="0.01" min="0" value="{{ transaction.joint_amount }}"></span>
+    </label>
+    <div class="field-pair">
+      <label>Tip <span class="money-input"><input id="tip_amount" name="tip_amount" type="number" inputmode="decimal" step="0.01" min="0" value="{{ '%.2f'|format(transaction.tip_amount or 0) if transaction.tip_amount else '' }}" placeholder="0.00"></span></label>
+      <label>Tip % <input id="tip_percent" name="tip_percent" type="number" inputmode="decimal" step="0.01" min="0" max="100" value="{{ transaction.tip_percent or '' }}" placeholder="0"></label>
+    </div>
+    <p class="hint" data-joint-total></p>
+    <label>Note <input name="note" value="{{ transaction.note or '' }}" placeholder="Optional"></label>
+  </div>
+
+  <details class="form-card details-card">
+    <summary>Details</summary>
+    <label>Merchant <input name="merchant" value="{{ transaction.merchant }}"></label>
+    <label>Card/account name <input name="account_name" value="{{ transaction.account_name or '' }}" placeholder="Chase Sapphire Preferred Visa"></label>
+    <input type="hidden" name="card_last4" value="{{ transaction.card_last4 or '' }}">
+    <label>Original alert <textarea readonly>{{ transaction.raw_text }}</textarea></label>
+  </details>
+
+  <div class="sticky-actions">
+    <a class="button secondary" href="/transactions">Cancel</a>
+    <button>Save</button>
+  </div>
 </form>
+{% endblock %}
+
+{% block scripts %}
 <script>
+  // Keep tip $ and tip % in sync, and show what will count as joint.
   const form = document.querySelector(".edit-form");
   const amount = Number(form.dataset.amount || "0");
   const tipPercent = document.querySelector("#tip_percent");
   const tipAmount = document.querySelector("#tip_amount");
-  const jointAmount = document.querySelector('input[name="joint_amount"]');
-  const status = document.querySelector('select[name="status"]');
+  const jointAmount = form.elements.joint_amount;
+  const jointTotal = document.querySelector("[data-joint-total]");
+  const money = (value) => (Number.isFinite(value) ? value.toFixed(2) : "");
 
-  function money(value) {
-    return Number.isFinite(value) ? value.toFixed(2) : "";
-  }
-
-  function percent(value) {
-    return Number.isFinite(value) ? value.toFixed(2) : "";
-  }
-
-  function updateJointTotalForCurrentStatus() {
+  function describe() {
     const tip = Number(tipAmount.value || "0");
-    if (status.value === "Joint" || status.value === "Venmo") {
+    const status = form.elements.status.value;
+    if (status === "Joint" || status === "Venmo") {
       jointAmount.value = money(amount + tip);
+      jointTotal.textContent = `${status === "Joint" ? "From joint" : "Venmo request"}: $${money(amount + tip)}`;
+    } else if (status === "Split") {
+      const joint = Math.min(amount, Number(jointAmount.value || "0"));
+      jointTotal.textContent = `Joint $${money(joint)} · personal $${money(amount + tip - joint)}`;
+    } else {
+      jointTotal.textContent = "";
     }
   }
 
-  function fromPercent() {
-    const pct = Number(tipPercent.value);
-    tipAmount.value = tipPercent.value === "" ? "" : money(amount * pct / 100);
-    updateJointTotalForCurrentStatus();
-  }
-
-  function fromAmount() {
-    const tip = Number(tipAmount.value);
-    tipPercent.value = tipAmount.value === "" || amount <= 0 ? "" : percent((tip / amount) * 100);
-    updateJointTotalForCurrentStatus();
-  }
-
-  ["input", "change", "keyup"].forEach((eventName) => {
-    tipPercent.addEventListener(eventName, fromPercent);
-    tipAmount.addEventListener(eventName, fromAmount);
+  tipPercent.addEventListener("input", () => {
+    tipAmount.value = tipPercent.value === "" ? "" : money((amount * Number(tipPercent.value)) / 100);
+    describe();
   });
-
-  status.addEventListener("change", () => {
-    if (status.value === "Joint" || status.value === "Venmo") {
-      updateJointTotalForCurrentStatus();
-    }
+  tipAmount.addEventListener("input", () => {
+    tipPercent.value = tipAmount.value === "" || amount <= 0 ? "" : money((Number(tipAmount.value) / amount) * 100);
+    describe();
   });
+  form.addEventListener("change", describe);
+  jointAmount.addEventListener("input", describe);
+  describe();
 </script>
 {% include "category_script.html" %}
 {% endblock %}

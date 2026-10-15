@@ -1,18 +1,93 @@
 {% extends "base.html" %}
+{% from "icons.html" import icon %}
+{% block title %}Transactions · Joint Expense Tracker{% endblock %}
+{% macro status_url(value) -%}
+/transactions?{% for key, current in filters.items() if key != "status" and current %}{{ key }}={{ current|urlencode }}&amp;{% endfor %}status={{ value }}
+{%- endmacro %}
 {% block content %}
 <section class="page-head">
-  <div><h1>Transactions</h1><p>Review, classify, split, and annotate imported alerts. Pick a category for Joint, Split, and Personal spending.</p></div>
+  <div>
+    <p class="eyebrow">Transactions</p>
+    <h1>{{ filters.month|month_name if filters.month else "All months" }}</h1>
+  </div>
+  <button class="button add-button" popovertarget="add-transaction">{{ icon("plus", 18) }}<span>Add</span></button>
 </section>
-<details class="add-transaction">
-  <summary class="add-trigger">+ Add transaction</summary>
-  <form class="manual-form" method="post" action="/transactions">
-    <div class="form-intro">
-      <strong>Record a missed purchase</strong>
-      <span>Use this when a bank alert did not come through.</span>
+
+<form class="search-bar" method="get" action="/transactions">
+  <label class="search-field">
+    {{ icon("search", 18) }}
+    <input type="search" name="q" value="{{ filters.q }}" placeholder="Search" aria-label="Search" enterkeyhint="search">
+  </label>
+  {% set active_filters = [filters.month, filters.account, filters.category]|select|list|length %}
+  <details class="filter-panel">
+    <summary class="icon-button" aria-label="Filters">{{ icon("filter", 18) }}{% if active_filters %}<span class="dot-badge">{{ active_filters }}</span>{% endif %}</summary>
+    <div class="filter-body">
+      <select name="month" aria-label="Month"><option value="">All months</option>{% for month in months %}<option value="{{ month }}" {% if filters.month == month %}selected{% endif %}>{{ month|month_name }}</option>{% endfor %}</select>
+      <select name="account" aria-label="Account"><option value="">All accounts</option>{% for acct in accounts %}<option value="{{ acct.card_last4 }}" {% if filters.account == acct.card_last4 %}selected{% endif %}>{{ acct.account_name }}</option>{% endfor %}</select>
+      <select name="category" aria-label="Category"><option value="">All categories</option>{% for name in categories %}<option value="{{ name }}" {% if filters.category == name %}selected{% endif %}>{{ name }}</option>{% endfor %}</select>
+      <div class="actions"><button>Apply</button>{% if active_filters or filters.q %}<a href="/transactions{% if filters.status %}?status={{ filters.status }}{% endif %}">Clear</a>{% endif %}</div>
     </div>
-    <label>Date <input name="transaction_date" type="date" value="{{ today }}" required></label>
+  </details>
+  {% if filters.status %}<input type="hidden" name="status" value="{{ filters.status }}">{% endif %}
+</form>
+
+<nav class="chip-row" aria-label="Status">
+  <a class="chip" href="{{ status_url('') }}" {% if not filters.status %}aria-current="page"{% endif %}>All</a>
+  {% for status in statuses %}
+  <a class="chip" href="{{ status_url(status) }}" {% if filters.status == status %}aria-current="page"{% endif %}><i class="dot" data-status="{{ status }}"></i>{{ status }}</a>
+  {% endfor %}
+</nav>
+
+{% if total_matching > transactions|length %}
+<p class="section-note">Showing the latest {{ transactions|length }} of {{ total_matching }} matching transactions. Pick a month or another filter to see the rest.</p>
+{% endif %}
+
+{% set day = namespace(current=none) %}
+<div class="tx-groups">
+  {% for tx in transactions %}
+  {% if tx.transaction_datetime[:10] != day.current %}
+    {% if day.current is not none %}</ul>{% endif %}
+    {% set day.current = tx.transaction_datetime[:10] %}
+    <h2 class="day-head">{{ tx.transaction_datetime|day }}</h2>
+    <ul class="list-card tx-list">
+  {% endif %}
+    <li>
+      <a class="tx-row" href="/transactions/{{ tx.id }}/edit">
+        <span class="tx-main">
+          <span class="tx-merchant">{{ tx.merchant }}</span>
+          <span class="tx-meta">
+            {{ tx.account_name or tx.card_last4 or "Unknown card" }}
+            {%- if tx.subcategory %} · {{ tx.subcategory }}{% endif %}
+            {%- if tx.tip_amount %} · tip {{ tx.tip_amount|money }}{% endif %}
+            {%- if tx.status == "Split" %} · joint {{ tx.joint_amount|money }}{% endif %}
+          </span>
+          {% if tx.note %}<span class="row-note">{{ tx.note }}</span>{% endif %}
+        </span>
+        <span class="tx-side">
+          <span class="money">{{ tx.amount|money }}</span>
+          <span class="status-tag" data-status="{{ tx.status }}">{{ tx.status }}</span>
+        </span>
+      </a>
+    </li>
+  {% if loop.last %}</ul>{% endif %}
+  {% else %}
+  <div class="empty-state">
+    <h2>Nothing here</h2>
+  </div>
+  {% endfor %}
+</div>
+
+<div id="add-transaction" class="sheet" popover>
+  <form class="sheet-form" method="post" action="/transactions">
+    <div class="sheet-head">
+      <h2>Add a purchase</h2>
+      <button type="button" class="icon-button" popovertarget="add-transaction" popovertargetaction="hide" aria-label="Close">{{ icon("x", 22) }}</button>
+    </div>
     <label>Merchant <input name="merchant" placeholder="e.g. Grocery store" required></label>
-    <label>Amount <input name="amount" type="number" inputmode="decimal" min="0.01" step="0.01" placeholder="0.00" required></label>
+    <div class="field-pair">
+      <label>Amount <span class="money-input"><input name="amount" type="number" inputmode="decimal" min="0.01" step="0.01" placeholder="0.00" required></span></label>
+      <label>Date <input name="transaction_date" type="date" value="{{ today }}" required></label>
+    </div>
     <label>Account
       <select name="card_last4">
         <option value="">No account selected</option>
@@ -23,58 +98,13 @@
       <select name="status">{% for status in statuses %}<option value="{{ status }}" {% if status == "Review" %}selected{% endif %}>{{ status }}</option>{% endfor %}</select>
     </label>
     {% include "category_input.html" %}
-    <label>Joint amount <span class="label-hint">For Split only</span><input name="joint_amount" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Optional"></label>
-    <label class="form-wide">Note <input name="note" placeholder="Optional note"></label>
-    <div class="actions form-wide"><button type="submit">Save transaction</button><span class="form-hint">You can edit the transaction later.</span></div>
+    <label data-split-only>Joint part <span class="money-input"><input name="joint_amount" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00"></span></label>
+    <label>Note <input name="note" placeholder="Optional"></label>
+    <button type="submit" class="button-block">Save purchase</button>
   </form>
-</details>
-<form class="filters" method="get" action="/transactions">
-  <select name="month" aria-label="Month"><option value="">All months</option>{% for month in months %}<option value="{{ month }}" {% if filters.month == month %}selected{% endif %}>{{ month }}</option>{% endfor %}</select>
-  <select name="status" aria-label="Status"><option value="">All but Ignored</option>{% for status in statuses %}<option value="{{ status }}" {% if filters.status == status %}selected{% endif %}>{{ status }}</option>{% endfor %}</select>
-  <select name="account" aria-label="Account"><option value="">All accounts</option>{% for acct in accounts %}<option value="{{ acct.card_last4 }}" {% if filters.account == acct.card_last4 %}selected{% endif %}>{{ acct.account_name }}</option>{% endfor %}</select>
-  <select name="category" aria-label="Category"><option value="">All categories</option>{% for name in categories %}<option value="{{ name }}" {% if filters.category == name %}selected{% endif %}>{{ name }}</option>{% endfor %}</select>
-  <input name="q" value="{{ filters.q }}" placeholder="Search merchant/raw text" aria-label="Search">
-  <button>Filter</button>
-</form>
-{% if total_matching > transactions|length %}
-<p class="section-note">Showing the latest {{ transactions|length }} of {{ total_matching }} matching transactions. Pick a month or another filter to see the rest.</p>
-{% endif %}
-<div class="table-wrap">
-  <table>
-    <thead><tr><th>Date</th><th>Merchant</th><th class="money">Amount</th><th class="money">Tip</th><th>Card</th><th>Status</th><th class="money">Joint</th><th>Note</th><th>Actions</th></tr></thead>
-    <tbody>
-      {% for tx in transactions %}
-      <tr>
-        <td>{{ tx.transaction_datetime[:10] }}</td>
-        <td>{{ tx.merchant }}</td>
-        <td class="money">{{ tx.amount|money }}</td>
-        <td class="money">
-          {% if tx.tip_amount %}
-          {{ tx.tip_amount|money }}{% if tx.tip_percent %} ({{ "%.1f"|format(tx.tip_percent) }}%){% endif %}
-          {% else %}
-          -
-          {% endif %}
-        </td>
-        <td>{{ tx.account_name or tx.card_last4 or "Unknown" }}</td>
-        <td><span class="pill">{{ tx.status }}</span>{% if tx.subcategory %}<div class="category-label">{{ tx.subcategory }}</div>{% endif %}</td>
-        <td class="money">{{ tx.joint_amount|money }}</td>
-        <td>{{ tx.note or "" }}</td>
-        <td><div class="row-actions">
-          {% with category_value=tx.subcategory or "" %}{% include "quick_classify.html" %}{% endwith %}
-          <form method="post" action="/transactions/{{ tx.id }}/classify" class="split-form">
-            <input type="hidden" name="status" value="Split">
-            <input type="hidden" name="return_to" value="{{ return_to }}">
-            <input name="joint_amount" type="number" min="0" step="0.01" placeholder="Split $" aria-label="Joint portion">
-            <button>Split</button>
-          </form>
-          <a href="/transactions/{{ tx.id }}/edit">Edit</a>
-        </div></td>
-      </tr>
-      {% else %}
-      <tr><td colspan="9">No transactions match these filters.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
 </div>
+{% endblock %}
+
+{% block scripts %}
 {% include "category_script.html" %}
 {% endblock %}

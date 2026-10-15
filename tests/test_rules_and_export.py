@@ -79,7 +79,15 @@ def test_quick_joint_allows_blank_tip_percent(monkeypatch) -> None:
     monkeypatch.setattr("joint_expense_tracker.web.classify_transaction", fake_classify_transaction)
 
     response = classify(
-        123, status="Joint", joint_amount=None, tip_percent="", tip_amount="", category=None, return_to="/transactions"
+        123,
+        status="Joint",
+        joint_amount=None,
+        tip_percent="",
+        tip_amount="",
+        category=None,
+        split_amount=None,
+        return_to="/transactions",
+        accept="",
     )
 
     assert response.status_code == 303
