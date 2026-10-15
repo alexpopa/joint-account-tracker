@@ -584,3 +584,16 @@ def test_csv_export(tmp_path: Path) -> None:
     assert rows[0]["Status"] == "Joint"
     assert "Tip Percent" in rows[0]
     assert "Tip Amount" in rows[0]
+
+
+def test_personal_total_includes_tips_and_the_personal_part_of_splits(conn) -> None:
+    dinner = create_manual_transaction(conn, "2026-07-03", "Dinner", 50)
+    update_transaction(conn, dinner, {"status": "Personal", "tip_amount": "10"})
+    split = create_manual_transaction(conn, "2026-07-04", "Shared", 40)
+    update_transaction(conn, split, {"status": "Split", "joint_amount": "15"})
+
+    data = dashboard_data(conn, "2026-07")
+
+    assert data["total_personal"] == 60 + 25
+    assert data["total_joint"] == 15
+

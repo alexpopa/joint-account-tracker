@@ -25,6 +25,17 @@ STATUS_COLORS = {
 }
 
 
+# How much of a transaction is joint vs. the owner's own spending. Venmo ("Her") is neither:
+# it's paid back by the partner. Personal spending includes tips and the non-joint part of a Split.
+JOINT_SPEND_SQL = "CASE WHEN status IN ('Joint', 'Split') THEN joint_amount ELSE 0 END"
+PERSONAL_SPEND_SQL = """CASE
+    WHEN status IN ('Personal', 'Wife') THEN amount + tip_amount
+    WHEN status = 'Split' THEN MAX(amount + tip_amount - joint_amount, 0)
+    ELSE 0 END"""
+SPENDING_STATUSES_SQL = "('Joint', 'Split', 'Personal', 'Wife')"
+
+
+
 def account_name_for(conn: sqlite3.Connection, card_last4: str | None) -> str | None:
     if not card_last4:
         return None
@@ -330,7 +341,7 @@ def dashboard_data(conn: sqlite3.Connection, month: str | None = None) -> dict[s
         conn.execute(
             """
             SELECT status, COUNT(*) AS count,
-                   ROUND(SUM(CASE WHEN status IN ('Joint', 'Split', 'Her') THEN joint_amount ELSE amount END), 2) AS total,
+                   ROUND(SUM(CASE WHEN status IN ('Joint', 'Split', 'Her') THEN joint_amount ELSE amount + tip_amount END), 2) AS total,
                    ROUND(SUM(CASE WHEN status IN ('Joint', 'Split') THEN joint_amount ELSE 0 END), 2) AS joint_total,
                    ROUND(SUM(CASE WHEN status = 'Her' THEN joint_amount ELSE 0 END), 2) AS venmo_total
             FROM transactions
@@ -356,29 +367,24 @@ def dashboard_data(conn: sqlite3.Connection, month: str | None = None) -> dict[s
             (*params, review_limit),
         ).fetchall()
     )
-    total_joint = conn.execute(
-        "SELECT ROUND(COALESCE(SUM(joint_amount), 0), 2) AS total FROM transactions WHERE month = ? AND status IN ('Joint', 'Split')",
+    totals = conn.execute(
+        f"""
+        SELECT ROUND(COALESCE(SUM({JOINT_SPEND_SQL}), 0), 2) AS joint,
+               ROUND(COALESCE(SUM(CASE WHEN status = 'Her' THEN joint_amount ELSE 0 END), 0), 2) AS venmo,
+               ROUND(COALESCE(SUM({PERSONAL_SPEND_SQL}), 0), 2) AS personal,
+               ROUND(COALESCE(SUM(CASE WHEN status = 'Wife' THEN amount + tip_amount ELSE 0 END), 0), 2) AS present
+        FROM transactions
+        WHERE month = ?
+        """,
         params,
-    ).fetchone()["total"]
-    total_venmo = conn.execute(
-        "SELECT ROUND(COALESCE(SUM(joint_amount), 0), 2) AS total FROM transactions WHERE month = ? AND status = 'Her'",
-        params,
-    ).fetchone()["total"]
-    total_personal = conn.execute(
-        "SELECT ROUND(COALESCE(SUM(amount), 0), 2) AS total FROM transactions WHERE month = ? AND status IN ('Personal', 'Wife')",
-        params,
-    ).fetchone()["total"]
-    total_present = conn.execute(
-        "SELECT ROUND(COALESCE(SUM(amount), 0), 2) AS total FROM transactions WHERE month = ? AND status = 'Wife'",
-        params,
-    ).fetchone()["total"]
+    ).fetchone()
     return {
         "months": all_months,
         "selected_month": selected,
-        "total_joint": total_joint or 0,
-        "total_venmo": total_venmo or 0,
-        "total_personal": total_personal or 0,
-        "total_present": total_present or 0,
+        "total_joint": totals["joint"],
+        "total_venmo": totals["venmo"],
+        "total_personal": totals["personal"],
+        "total_present": totals["present"],
         "totals_by_account": totals_by_account,
         "totals_by_status": totals_by_status,
         "needs_review": review,

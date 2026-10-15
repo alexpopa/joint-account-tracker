@@ -94,3 +94,5 @@ Open Trends to compare transaction counts and tracked amounts for every status b
 ### Venmo display label
 
 The dashboard, transaction screens, and Trends display the stored `Her` status as Venmo. Existing records, form values, rules, and CSV exports retain `Her`; reimbursement calculations are unchanged.
+
+Personal spending includes tips and the non-joint remainder of Split purchases.
