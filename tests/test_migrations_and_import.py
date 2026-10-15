@@ -1,4 +1,6 @@
 import sqlite3
+from datetime import UTC, datetime
+from joint_expense_tracker.parser import parse_alert
 from joint_expense_tracker import config
 from joint_expense_tracker.db import MIGRATIONS, get_db, init_db
 from joint_expense_tracker.db import backup_database
@@ -56,6 +58,10 @@ def test_legacy_database_is_migrated_once(tmp_path) -> None:
     with get_db(path) as conn:
         assert conn.execute("PRAGMA user_version").fetchone()[0] == len(MIGRATIONS)
         rows = {r["merchant"]: r for r in conn.execute("SELECT * FROM transactions")}
+        assert (rows["Late Dinner"]["transaction_datetime"], rows["Late Dinner"]["month"]) == (
+            "2026-09-30T21:30:00-04:00",
+            "2026-09",
+        )
         assert rows["Lunch"]["month"] == "2026-09"
         assert rows["Manual"]["transaction_datetime"] == "2026-09-30T12:00:00"
         assert rows["Late Dinner"]["tip_amount"] == 0 and rows["Late Dinner"]["subcategory"] is None
@@ -64,4 +70,19 @@ def test_legacy_database_is_migrated_once(tmp_path) -> None:
         names = [r["name"] for r in conn.execute("SELECT name FROM personal_subcategories")]
         assert "Food" not in names and "Groceries" in names
     assert list(config.BACKUP_DIR.glob(f"*-before-v{len(MIGRATIONS)}.sqlite")), "migrations must back up first"
+
+
+
+def apple_nanoseconds(moment: datetime) -> int:
+    return int((moment - datetime(2001, 1, 1, tzinfo=UTC)).total_seconds() * 1_000_000_000)
+
+
+
+def test_alert_month_uses_eastern_time() -> None:
+    alert = parse_alert(
+        "Chase Sapphire: You made a $50.00 transaction with LATE DINER on Sep 30, 2026 at 9:30 PM ET.",
+        message_date_raw=apple_nanoseconds(datetime(2026, 10, 1, 1, 30, tzinfo=UTC)),
+    )
+    assert alert.month == "2026-09"
+    assert alert.transaction_datetime == "2026-09-30T21:30:00-04:00"
 

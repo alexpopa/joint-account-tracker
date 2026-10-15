@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
+from .config import APP_TIMEZONE
 from .models import ParsedAlert
 
 AMOUNT_RE = re.compile(r"(?:\$|USD\s*)(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{2}))?", re.I)
@@ -10,7 +11,9 @@ LAST4_RE = re.compile(
     r"(?:ending(?:\s+in)?|card(?:\s+ending(?:\s+in)?)?|account(?:\s+ending(?:\s+in)?)?|acct)\s*(?:x{0,4}|[*]{0,4})\s*(\d{4})",
     re.I,
 )
-DATE_BOUNDARY = r"(?:\s+on\s+\w{3,9}\s+\d{1,2},?\s+\d{4}(?:\s+\d{1,2}:\d{2}\s*(?:AM|PM)?\s*ET)?|\s+on\s+\d{1,2}/\d{1,2}|\.\s*$|$)"
+DATE_BOUNDARY = (
+    r"(?:\s+on\s+\w{3,9}\s+\d{1,2},?\s+\d{4}(?:\s+\d{1,2}:\d{2}\s*(?:AM|PM)?\s*ET)?|\s+on\s+\d{1,2}/\d{1,2}|\.\s*$|$)"
+)
 
 MERCHANT_PATTERNS = [
     re.compile(rf"\btransaction\s+with\s+(.+?){DATE_BOUNDARY}", re.I),
@@ -23,8 +26,14 @@ MERCHANT_PATTERNS = [
     re.compile(r"\b(?:we(?:'|’)ve|we have)\s+received\s+your\s+\$[\d,.]+\s+payment\b", re.I),
     re.compile(r"\bautomatic\s+stmnt\s+balance\s+payment\s+is\s+scheduled\b", re.I),
     re.compile(rf"\bDirect\s+Deposit\s+posted{DATE_BOUNDARY}", re.I),
-    re.compile(rf"\bat\s+(?!\d{{1,2}}:\d{{2}}\s)(.+?)(?:\s+on\s+\w{{3,9}}\s+\d{{1,2}},?\s+\d{{4}}|\s+on\s+\d{{1,2}}/\d{{1,2}}|\s+for\s+\$|\.\s*$|$)", re.I),
-    re.compile(rf"\bfrom\s+(.+?)(?:\s+on\s+\w{{3,9}}\s+\d{{1,2}},?\s+\d{{4}}|\s+on\s+\d{{1,2}}/\d{{1,2}}|\s+for\s+\$|\.\s*$|$)", re.I),
+    re.compile(
+        r"\bat\s+(?!\d{1,2}:\d{2}\s)(.+?)(?:\s+on\s+\w{3,9}\s+\d{1,2},?\s+\d{4}|\s+on\s+\d{1,2}/\d{1,2}|\s+for\s+\$|\.\s*$|$)",
+        re.I,
+    ),
+    re.compile(
+        r"\bfrom\s+(.+?)(?:\s+on\s+\w{3,9}\s+\d{1,2},?\s+\d{4}|\s+on\s+\d{1,2}/\d{1,2}|\s+for\s+\$|\.\s*$|$)",
+        re.I,
+    ),
     re.compile(r"\bmerchant[:\s]+(.+?)(?:\.|$)", re.I),
 ]
 
@@ -108,10 +117,10 @@ def apple_timestamp_to_datetime(raw: object) -> datetime | None:
         return None
     try:
         value = int(raw)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
-    apple_epoch = datetime(2001, 1, 1, tzinfo=timezone.utc)
+    apple_epoch = datetime(2001, 1, 1, tzinfo=UTC)
     candidates: list[datetime] = []
     for divisor in (1_000_000_000, 1_000_000, 1_000, 1):
         try:
@@ -120,12 +129,12 @@ def apple_timestamp_to_datetime(raw: object) -> datetime | None:
             continue
     for divisor in (1_000_000_000, 1_000_000, 1_000, 1):
         try:
-            candidates.append(datetime.fromtimestamp(value / divisor, tz=timezone.utc))
-        except (OverflowError, OSError, ValueError):
+            candidates.append(datetime.fromtimestamp(value / divisor, tz=UTC))
+        except OverflowError, OSError, ValueError:
             continue
 
-    now = datetime.now(timezone.utc)
-    plausible = [dt for dt in candidates if datetime(1998, 1, 1, tzinfo=timezone.utc) <= dt <= now + timedelta(days=2)]
+    now = datetime.now(UTC)
+    plausible = [dt for dt in candidates if datetime(1998, 1, 1, tzinfo=UTC) <= dt <= now + timedelta(days=2)]
     if plausible:
         return max(plausible)
     return None
@@ -148,7 +157,8 @@ def parse_alert(
     amount = extract_amount(text)
     if amount is None:
         return None
-    dt = apple_timestamp_to_datetime(message_date_raw) or datetime.now(timezone.utc)
+    # Bucket by Eastern time: a 9 PM purchase on the 31st belongs to that month, not the next one in UTC.
+    dt = (apple_timestamp_to_datetime(message_date_raw) or datetime.now(UTC)).astimezone(APP_TIMEZONE)
     return ParsedAlert(
         amount=amount,
         merchant=extract_merchant(text),

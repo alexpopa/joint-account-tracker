@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import (
+    APP_TIMEZONE,
     BACKUP_DIR,
     BACKUPS_TO_KEEP,
     CATEGORIZED_STATUSES,
@@ -25,7 +26,7 @@ def utc_now() -> str:
 
 
 def local_now() -> datetime:
-    return datetime.now()
+    return datetime.now(APP_TIMEZONE)
 
 
 def current_month() -> str:
@@ -213,10 +214,25 @@ def _migration_cleanup_defaults(conn: sqlite3.Connection) -> None:
 
 
 
+def _migration_local_time(conn: sqlite3.Connection) -> None:
+    """Re-express imported UTC timestamps in Eastern time so late-evening purchases land in the right month."""
+    rows = conn.execute(
+        "SELECT id, transaction_datetime FROM transactions WHERE transaction_datetime LIKE '%+00:00'"
+    ).fetchall()
+    for row in rows:
+        local = datetime.fromisoformat(row["transaction_datetime"]).astimezone(APP_TIMEZONE)
+        conn.execute(
+            "UPDATE transactions SET transaction_datetime = ?, month = ? WHERE id = ?",
+            (local.isoformat(timespec="seconds"), local.strftime("%Y-%m"), row["id"]),
+        )
+
+
+
 # Each migration runs once, in order; PRAGMA user_version records how many have run.
 # Append new migrations to the end. Never edit or reorder ones that have shipped.
 MIGRATIONS = [
     _migration_cleanup_defaults,
+    _migration_local_time,
 ]
 
 
