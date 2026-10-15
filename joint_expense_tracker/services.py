@@ -55,7 +55,6 @@ def _already_imported(conn: sqlite3.Connection, alert: ParsedAlert) -> bool:
     return conn.execute(query, (key,)).fetchone() is not None
 
 
-
 def insert_alert(conn: sqlite3.Connection, alert: ParsedAlert) -> bool:
     """Insert a parsed alert unless it was already imported. Returns True if a row was added."""
     if _already_imported(conn, alert):
@@ -98,10 +97,8 @@ def insert_alert(conn: sqlite3.Connection, alert: ParsedAlert) -> bool:
     return True
 
 
-
 def _append_note(note: str | None, text: str) -> str:
     return f"{note} · {text}" if note else text
-
 
 
 def pair_refund(conn: sqlite3.Connection, credit_id: int) -> int | None:
@@ -151,7 +148,6 @@ def pair_refund(conn: sqlite3.Connection, credit_id: int) -> int | None:
         (credit_status, _append_note(credit["note"], credit_note), utc_now(), credit_id),
     )
     return int(purchase["id"])
-
 
 
 def create_manual_transaction(
@@ -320,6 +316,10 @@ def month_label(month: str, fmt: str = "%b %Y") -> str:
     return datetime.strptime(month, "%Y-%m").strftime(fmt)
 
 
+def last_import(conn: sqlite3.Connection) -> dict[str, Any] | None:
+    row = conn.execute("SELECT * FROM import_runs ORDER BY id DESC LIMIT 1").fetchone()
+    return dict(row) if row else None
+
 
 def dashboard_data(conn: sqlite3.Connection, month: str | None = None) -> dict[str, Any]:
     all_months = months(conn)
@@ -393,6 +393,7 @@ def dashboard_data(conn: sqlite3.Connection, month: str | None = None) -> dict[s
         "needs_review_display_count": len(review),
         "needs_review_limit": review_limit,
         "statuses": STATUSES,
+        "last_import": last_import(conn),
     }
 
 

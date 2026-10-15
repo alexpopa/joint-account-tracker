@@ -16,6 +16,14 @@
   </form>
 </section>
 
+{% if last_import %}
+  {% if last_import.error %}
+  <p class="notice notice-error" role="alert"><strong>Last import failed.</strong> {{ last_import.error }} <a href="/diagnostics">Run diagnostics</a></p>
+  {% else %}
+  <p class="import-status">Last import {{ last_import.finished_at[:16]|replace("T", " ") }} UTC · {{ last_import.messages_imported }} new transaction{{ "" if last_import.messages_imported == 1 else "s" }}</p>
+  {% endif %}
+{% endif %}
+
 <section class="metrics">
   <div class="metric">
     <span>Total joint reimbursement</span>

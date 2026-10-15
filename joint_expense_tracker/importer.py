@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import re
 import shutil
 import sqlite3
+import sys
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
-import re
 
 from .config import DEFAULT_CHASE_KEYWORDS, DEFAULT_CHASE_SENDERS, DEFAULT_MESSAGES_DB, SNAPSHOT_DIR, ensure_data_dirs
 from .db import backup_database, get_db, get_setting, utc_now
@@ -84,7 +86,7 @@ def _decode_attributed_body(value: object) -> str | None:
 
 
 def _message_text(row: sqlite3.Row) -> str:
-    text = row["text"] if "text" in row.keys() else None
+    text = row["text"] if "text" in row.keys() else None  # noqa: SIM118 - sqlite3.Row `in` checks values, not keys
     if text:
         return str(text)
     return _decode_attributed_body(row["attributedBody"]) or ""
@@ -112,7 +114,9 @@ def _candidate_messages(
 
     guid_expr = "m.guid AS guid" if "guid" in message_cols else "NULL AS guid"
     body_expr = "m.attributedBody AS attributedBody" if "attributedBody" in message_cols else "NULL AS attributedBody"
-    handle_join = "LEFT JOIN handle h ON h.ROWID = m.handle_id" if "handle_id" in message_cols else "LEFT JOIN handle h ON 1 = 0"
+    handle_join = (
+        "LEFT JOIN handle h ON h.ROWID = m.handle_id" if "handle_id" in message_cols else "LEFT JOIN handle h ON 1 = 0"
+    )
     sender_where = " OR ".join(["h.id LIKE ?" for _ in senders]) or "0"
     keyword_where = " OR ".join(["m.text LIKE ?" for _ in keywords]) or "0"
     params: list[str | int] = [f"%{keyword}%" for keyword in keywords]
@@ -131,6 +135,19 @@ def _candidate_messages(
     return snapshot_conn.execute(sql, params).fetchall()
 
 
+def describe_import_error(exc: Exception) -> str:
+    """Turn an import failure into a message that says what to do about it."""
+    text = str(exc)
+    if isinstance(exc, PermissionError) or "not permitted" in text or "unable to open" in text:
+        return (
+            f"macOS blocked access to Messages ({text}). Grant Full Disk Access to {Path(sys.executable).resolve()} "
+            "in System Settings → Privacy & Security → Full Disk Access, then restart the app."
+        )
+    if isinstance(exc, FileNotFoundError):
+        return f"{text}. Check the Messages DB path in Settings."
+    return f"{type(exc).__name__}: {text}"
+
+
 def import_messages() -> ImportResult:
     result = ImportResult()
     started_at = utc_now()
@@ -145,7 +162,7 @@ def import_messages() -> ImportResult:
         keywords = _csv_setting(get_setting(app_conn, "chase_keyword_filters", ""), DEFAULT_CHASE_KEYWORDS)
         try:
             snapshot = copy_messages_snapshot(messages_path)
-            with _open_snapshot_readonly(snapshot) as snapshot_conn:
+            with closing(_open_snapshot_readonly(snapshot)) as snapshot_conn:
                 rows = _candidate_messages(snapshot_conn, senders, keywords)
                 # Candidates are newest-first; insert purchases before later refunds.
                 for row in reversed(rows):
@@ -163,7 +180,7 @@ def import_messages() -> ImportResult:
                     if parsed and insert_alert(app_conn, parsed):
                         result.messages_imported += 1
         except Exception as exc:  # noqa: BLE001 - importer must fail gracefully for FDA/schema issues.
-            result.error = str(exc)
+            result.error = describe_import_error(exc)
         finally:
             app_conn.execute(
                 """
@@ -187,7 +204,7 @@ def diagnose_messages() -> list[str]:
     try:
         snapshot = copy_messages_snapshot(messages_path)
         lines.append(f"Snapshot copy: succeeded ({snapshot})")
-        with _open_snapshot_readonly(snapshot) as snapshot_conn:
+        with closing(_open_snapshot_readonly(snapshot)) as snapshot_conn:
             rows = _candidate_messages(snapshot_conn, senders, keywords, limit=25)
             rows = [row for row in rows if _matches_filters(_message_text(row), row["sender"], senders, keywords)]
             lines.append(f"Recent incoming dollar-message candidates: {len(rows)}")
@@ -199,10 +216,6 @@ def diagnose_messages() -> list[str]:
                 lines.append(f"  sender={sender} count={count}")
             if not rows:
                 lines.append("No candidates found. Check Chase sender/keyword filters in Settings.")
-    except PermissionError as exc:
-        lines.append(f"Snapshot copy: failed ({exc})")
-        lines.append("Full Disk Access may be needed for Terminal, Python, or your IDE.")
     except Exception as exc:  # noqa: BLE001 - diagnostic command should explain any local failure.
-        lines.append(f"Snapshot/read diagnosis failed: {exc}")
-        lines.append("If this is an access error, enable Full Disk Access and retry.")
+        lines.append(f"Snapshot/read diagnosis failed: {describe_import_error(exc)}")
     return lines

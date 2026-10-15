@@ -47,17 +47,24 @@ Logs are written to `launchd/manual-web.log` and `launchd/manual-web.err.log`.
 
 ## Full Disk Access
 
-macOS may block access to Messages. If diagnosis or import fails:
+macOS only lets programs with Full Disk Access read Messages. The app runs the Python
+interpreter behind `.venv/bin/python`. Find its real path with:
 
-System Settings -> Privacy & Security -> Full Disk Access -> enable Terminal, or the specific Python/IDE app being used.
+```bash
+python3 -c "import os; print(os.path.realpath('.venv/bin/python'))"
+```
 
-Then retry:
+Then go to System Settings → Privacy & Security → Full Disk Access, click **+**, press
+⌘⇧G, paste that path, add it, and restart the LaunchAgent. If an import fails, the
+Dashboard shows the exact path to grant. Upgrading Python means granting it again.
+
+To check access:
 
 ```bash
 uv run python -m joint_expense_tracker diagnose-messages
 ```
 
-The diagnostic command prints whether `chat.db` exists, whether copying succeeded, and recent sender IDs with dollar-message counts. It does not dump full message text by default.
+The diagnostic command prints whether `chat.db` exists, whether copying succeeded, and recent sender IDs with dollar-message counts. It doesn't print full message text.
 
 ## Commands
 
@@ -117,7 +124,8 @@ For any month, Spending shows:
 
 ## Workflow
 
-1. Import alerts (Dashboard → Import New Messages).
+1. Import alerts (Dashboard → Import New Messages). The Dashboard shows the result of
+   the last import, including what to do if it failed.
 2. New purchases start in Review unless a rule classifies them.
 3. Map card last4 values to friendly names on Accounts.
 4. Classify each purchase. For restaurants, enter the tip before clicking Joint,

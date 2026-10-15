@@ -7,6 +7,7 @@
   --accent: #196f5d;
   --accent-dark: #0d4c40;
   --gold: #b17614;
+  --danger: #b42318;
   /* Chart series (validated pair: blue/orange pass CVD and contrast checks on white). */
   --series-joint: #2a78d6;
   --series-personal: #eb6834;
@@ -215,6 +216,8 @@ tr:last-child td { border-bottom: 0; }
 
 button.secondary { background: #fff; color: var(--accent-dark); border-color: var(--line); }
 button.secondary:hover { background: #edf5f1; }
+.notice-error { margin-bottom: 14px; background: #fef3f2; border-left-color: var(--danger); color: #7a271a; }
+.import-status { margin: -10px 0 14px; font-size: 13px; }
 .row-note { margin-top: 4px; color: var(--muted); font-size: 12px; }
 .table-wrap.narrow { max-width: 520px; }
 

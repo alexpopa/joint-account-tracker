@@ -1,13 +1,18 @@
+"""Schema migrations, deduplication, refund pairing, and backups."""
+
+from __future__ import annotations
+
 import sqlite3
-from joint_expense_tracker.models import ParsedAlert
-from joint_expense_tracker.services import insert_alert
 from datetime import UTC, datetime
-from joint_expense_tracker.parser import parse_alert
+
 from joint_expense_tracker import config
-from joint_expense_tracker.db import MIGRATIONS, get_db, init_db
-from joint_expense_tracker.db import backup_database
+from joint_expense_tracker.db import MIGRATIONS, backup_database, get_db, init_db
+from joint_expense_tracker.importer import describe_import_error
+from joint_expense_tracker.models import ParsedAlert
+from joint_expense_tracker.parser import parse_alert
+from joint_expense_tracker.services import insert_alert
 
-
+# The transactions/rules schema as shipped before versioned migrations existed.
 LEGACY_SCHEMA = """
 CREATE TABLE transactions (
     id INTEGER PRIMARY KEY, source_message_id TEXT UNIQUE, source_guid TEXT, source_sender TEXT,
@@ -34,18 +39,17 @@ VALUES ('2026-09-30T12:00:00', '2026-09', 5, 'Manual', 'Review', 'Manually added
 """
 
 
-def test_daily_backup_is_written_once_and_pruned(db_path, tmp_path, monkeypatch) -> None:
-    backups = tmp_path / "backups"
-    monkeypatch.setattr("joint_expense_tracker.db.BACKUPS_TO_KEEP", 2)
-    for stamp in ("2026-01-01", "2026-01-02", "2026-01-03"):
-        (backups / f"joint_expenses-{stamp}.sqlite").parent.mkdir(exist_ok=True)
-        (backups / f"joint_expenses-{stamp}.sqlite").write_bytes(b"")
+def apple_nanoseconds(moment: datetime) -> int:
+    return int((moment - datetime(2001, 1, 1, tzinfo=UTC)).total_seconds() * 1_000_000_000)
 
-    written = backup_database(db_path, backup_dir=backups)
-    assert written is not None and written.stat().st_size > 0
-    assert backup_database(db_path, backup_dir=backups) is None
-    assert len(list(backups.glob("joint_expenses-????-??-??.sqlite"))) == 2
 
+def test_alert_month_uses_eastern_time() -> None:
+    alert = parse_alert(
+        "Chase Sapphire: You made a $50.00 transaction with LATE DINER on Sep 30, 2026 at 9:30 PM ET.",
+        message_date_raw=apple_nanoseconds(datetime(2026, 10, 1, 1, 30, tzinfo=UTC)),
+    )
+    assert alert.month == "2026-09"
+    assert alert.transaction_datetime == "2026-09-30T21:30:00-04:00"
 
 
 def test_legacy_database_is_migrated_once(tmp_path) -> None:
@@ -74,22 +78,6 @@ def test_legacy_database_is_migrated_once(tmp_path) -> None:
     assert list(config.BACKUP_DIR.glob(f"*-before-v{len(MIGRATIONS)}.sqlite")), "migrations must back up first"
 
 
-
-def apple_nanoseconds(moment: datetime) -> int:
-    return int((moment - datetime(2001, 1, 1, tzinfo=UTC)).total_seconds() * 1_000_000_000)
-
-
-
-def test_alert_month_uses_eastern_time() -> None:
-    alert = parse_alert(
-        "Chase Sapphire: You made a $50.00 transaction with LATE DINER on Sep 30, 2026 at 9:30 PM ET.",
-        message_date_raw=apple_nanoseconds(datetime(2026, 10, 1, 1, 30, tzinfo=UTC)),
-    )
-    assert alert.month == "2026-09"
-    assert alert.transaction_datetime == "2026-09-30T21:30:00-04:00"
-
-
-
 def test_reused_message_rowid_is_still_imported(conn) -> None:
     first = ParsedAlert(
         10, "Store A", None, "2026-09-01T12:00:00-04:00", "2026-09", "raw", source_message_id="7", source_guid="guid-1"
@@ -108,7 +96,6 @@ def test_reused_message_rowid_is_still_imported(conn) -> None:
     assert conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == 2
 
 
-
 def credit(amount: float, merchant: str, when: str, guid: str) -> ParsedAlert:
     return ParsedAlert(
         amount,
@@ -123,7 +110,6 @@ def credit(amount: float, merchant: str, when: str, guid: str) -> ParsedAlert:
     )
 
 
-
 def purchase(conn, amount: float, merchant: str, when: str, status: str = "Review") -> int:
     return conn.execute(
         "INSERT INTO transactions (transaction_datetime, month, amount, merchant, status, joint_amount, raw_text) "
@@ -132,10 +118,8 @@ def purchase(conn, amount: float, merchant: str, when: str, status: str = "Revie
     ).lastrowid
 
 
-
 def status_and_note(conn, tx_id: int) -> tuple[str, str | None]:
     return tuple(conn.execute("SELECT status, note FROM transactions WHERE id = ?", (tx_id,)).fetchone())
-
 
 
 def test_refund_ignores_unreviewed_purchase(conn) -> None:
@@ -145,7 +129,6 @@ def test_refund_ignores_unreviewed_purchase(conn) -> None:
 
     assert status_and_note(conn, bought) == ("Ignored", "Refunded on 2026-09-15")
     assert status_and_note(conn, credit_id) == ("Ignored", "Refund of purchase on 2026-09-13")
-
 
 
 def test_refund_of_classified_purchase_is_flagged_not_changed(conn) -> None:
@@ -159,7 +142,6 @@ def test_refund_of_classified_purchase_is_flagged_not_changed(conn) -> None:
     assert "Joint purchase on 2026-08-20" in note
 
 
-
 def test_refund_without_matching_purchase_stays_ignored(conn) -> None:
     purchase(conn, 99, "OTHER STORE", "2026-09-01T10:00:00-04:00")
     purchase(conn, 23.45, "SP REDRAGONSHOP", "2026-05-01T10:00:00-04:00")  # outside the 60-day window
@@ -167,6 +149,24 @@ def test_refund_without_matching_purchase_stays_ignored(conn) -> None:
     credit_id = conn.execute("SELECT MAX(id) FROM transactions").fetchone()[0]
     assert status_and_note(conn, credit_id) == ("Ignored", None)
 
+
+def test_daily_backup_is_written_once_and_pruned(db_path, tmp_path, monkeypatch) -> None:
+    backups = tmp_path / "backups"
+    monkeypatch.setattr("joint_expense_tracker.db.BACKUPS_TO_KEEP", 2)
+    for stamp in ("2026-01-01", "2026-01-02", "2026-01-03"):
+        (backups / f"joint_expenses-{stamp}.sqlite").parent.mkdir(exist_ok=True)
+        (backups / f"joint_expenses-{stamp}.sqlite").write_bytes(b"")
+
+    written = backup_database(db_path, backup_dir=backups)
+    assert written is not None and written.stat().st_size > 0
+    assert backup_database(db_path, backup_dir=backups) is None
+    assert len(list(backups.glob("joint_expenses-????-??-??.sqlite"))) == 2
+
+
+def test_import_errors_explain_full_disk_access() -> None:
+    message = describe_import_error(PermissionError("[Errno 1] Operation not permitted: 'chat.db'"))
+    assert "Full Disk Access" in message
+    assert "python" in message.lower()
 
 
 def test_import_pairs_refund_when_purchase_is_in_the_same_batch(client, monkeypatch) -> None:
@@ -198,4 +198,3 @@ def test_import_pairs_refund_when_purchase_is_in_the_same_batch(client, monkeypa
         transactions = list(conn.execute("SELECT status, note FROM transactions ORDER BY source_message_id"))
     assert [tx["status"] for tx in transactions] == ["Ignored", "Ignored"]
     assert all(tx["note"] for tx in transactions)
-
