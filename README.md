@@ -4,6 +4,9 @@ Local Mac web app that imports Chase purchase SMS alerts from Apple Messages and
 you tag each purchase. It tells you how much to pull from the joint bank account each
 month, how much to request via Venmo, and where the money went by category.
 
+Coding agents: read [`AGENTS.md`](AGENTS.md) before changing anything. Planned work is
+in [`ROADMAP.md`](ROADMAP.md).
+
 ## Privacy Model
 
 - Runs locally on your Mac. Reachable from your other devices over Tailscale on port `8787`.
