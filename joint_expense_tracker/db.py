@@ -266,6 +266,20 @@ def _migration_plain_status_names(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_settle_existing_refunds(conn: sqlite3.Connection) -> None:
+    """Ignore credits imported before they were auto-ignored, and pair each with its purchase."""
+    from .services import pair_refund  # services imports db, so import at call time
+
+    credit_filter = "raw_text LIKE '%pending credit from%'"
+    conn.execute(
+        f"UPDATE transactions SET status = 'Ignored', joint_amount = 0, subcategory = NULL WHERE {credit_filter}"
+    )
+    for row in conn.execute(
+        f"SELECT id FROM transactions WHERE {credit_filter} ORDER BY transaction_datetime"
+    ).fetchall():
+        pair_refund(conn, row["id"])
+
+
 # Each migration runs once, in order; PRAGMA user_version records how many have run.
 # Append new migrations to the end. Never edit or reorder ones that have shipped.
 MIGRATIONS = [
@@ -273,6 +287,7 @@ MIGRATIONS = [
     _migration_local_time,
     _migration_dedupe_by_guid,
     _migration_plain_status_names,
+    _migration_settle_existing_refunds,
 ]
 
 

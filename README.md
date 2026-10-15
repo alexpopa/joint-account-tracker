@@ -138,13 +138,14 @@ For any month, Spending shows:
 
 ### Refunds
 
-When a refund alert ("pending credit from …") arrives, the app looks for the
-matching purchase: same merchant, same amount, within the previous 60 days.
+Refunds are handled automatically. When a refund alert ("pending credit from …")
+arrives, the app finds the matching purchase (same merchant, same amount, within the
+previous 60 days) and marks both Ignored, even if you'd already tagged the purchase.
+The purchase's note says when it was refunded and what it used to be. This can lower
+a month you've already settled.
 
-- If that purchase is still in Review, both are marked Ignored, with notes.
-- If you already classified it, the refund goes to Review with a note pointing at the
-  purchase. That way the app never silently changes a total you may already have acted
-  on. If it was a full refund, Ignore both.
+One exception: if the same charge shows up again within a day after the "refund," that
+was a card hold being released and re-charged, so nothing is ignored.
 
 ### Rules
 

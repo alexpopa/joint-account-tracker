@@ -11,7 +11,7 @@ from pathlib import Path
 from .config import DEFAULT_CHASE_KEYWORDS, DEFAULT_CHASE_SENDERS, DEFAULT_MESSAGES_DB, SNAPSHOT_DIR, ensure_data_dirs
 from .db import backup_database, get_db, get_setting, utc_now
 from .parser import extract_amount, parse_alert
-from .services import insert_alert
+from .services import insert_alert, pair_refund
 
 
 @dataclass
@@ -164,6 +164,7 @@ def import_messages() -> ImportResult:
             snapshot = copy_messages_snapshot(messages_path)
             with closing(_open_snapshot_readonly(snapshot)) as snapshot_conn:
                 rows = _candidate_messages(snapshot_conn, senders, keywords)
+                new_credits: list[int] = []
                 # Candidates are newest-first; insert purchases before later refunds.
                 for row in reversed(rows):
                     text = _message_text(row)
@@ -177,8 +178,13 @@ def import_messages() -> ImportResult:
                         source_guid=row["guid"],
                         source_sender=row["sender"],
                     )
-                    if parsed and insert_alert(app_conn, parsed):
+                    new_id = insert_alert(app_conn, parsed) if parsed else None
+                    if new_id:
                         result.messages_imported += 1
+                        if parsed.is_credit:
+                            new_credits.append(new_id)
+                for credit_id in new_credits:
+                    pair_refund(app_conn, credit_id)
         except Exception as exc:  # noqa: BLE001 - importer must fail gracefully for FDA/schema issues.
             result.error = describe_import_error(exc)
         finally:

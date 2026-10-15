@@ -86,9 +86,10 @@ Data flow for an import: `importer.import_messages` takes the daily backup, copi
 `chat.db` (+ WAL/SHM) into `messages_snapshot/`, opens the copy read-only, selects
 incoming messages matching the sender/keyword filters from Settings, and calls
 `parser.parse_alert` on each. `services.insert_alert` skips already-imported
-messages, fills in the account name, applies rules, inserts the row, and pairs
-refunds with their purchases. Candidates are selected newest-first, then inserted
-oldest-first so a purchase is available before a refund in the same batch.
+messages, fills in the account name, applies rules, and inserts the row.
+Candidates are selected newest-first, then inserted oldest-first. After the whole
+batch is in, the importer calls `services.pair_refund` for each new credit, so a
+purchase or re-charge from the same batch is already visible.
 
 Behavior that's easy to get wrong:
 
@@ -101,10 +102,12 @@ Behavior that's easy to get wrong:
   timestamp with offset (`2026-09-30T21:30:00-04:00`); manual rows store
   `YYYY-MM-DDT12:00:00`. `month` is derived from the local date.
 - **Refund pairing** (`services.pair_refund`): a "pending credit from X" alert is
-  matched to the latest same-merchant, same-amount purchase in the prior 60 days.
-  If that purchase is still in Review, both are Ignored, with notes. If it was
-  already classified, the credit goes to Review with a note and nothing else
-  changes, because that money may already have been moved.
+  matched to the latest same-merchant, same-amount, not-yet-Ignored purchase in the
+  prior 60 days. Both are Ignored, whatever the purchase was tagged as (the owner's
+  choice, even if it lowers a settled month). The purchase's note records its
+  previous status. Exception: a same-merchant, same-amount charge within a day
+  *after* the credit means a card hold was released and re-charged, so nothing is
+  paired.
 - **Amounts are floats** (`REAL`), rounded to cents on write and in SQL sums.
 
 ## Database migrations

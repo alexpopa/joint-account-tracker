@@ -61,10 +61,14 @@ def _already_imported(conn: sqlite3.Connection, alert: ParsedAlert) -> bool:
     return conn.execute(query, (key,)).fetchone() is not None
 
 
-def insert_alert(conn: sqlite3.Connection, alert: ParsedAlert) -> bool:
-    """Insert a parsed alert unless it was already imported. Returns True if a row was added."""
+def insert_alert(conn: sqlite3.Connection, alert: ParsedAlert) -> int | None:
+    """Insert a parsed alert unless it was already imported. Returns the new row id, or None.
+
+    Credits are not paired here: call pair_refund once the whole batch is inserted, so a
+    re-charge that arrives right after a credit is visible (see pair_refund).
+    """
     if _already_imported(conn, alert):
-        return False
+        return None
     alert.account_name = account_name_for(conn, alert.card_last4) or alert.account_name
     # Card payments, deposits, and credits stay Ignored; rules only classify purchases.
     if alert.status != "Ignored":
@@ -98,9 +102,7 @@ def insert_alert(conn: sqlite3.Connection, alert: ParsedAlert) -> bool:
             save_category(conn, alert.status, alert.subcategory),
         ),
     )
-    if alert.is_credit:
-        pair_refund(conn, int(cursor.lastrowid))
-    return True
+    return int(cursor.lastrowid)
 
 
 def _append_note(note: str | None, text: str) -> str:
@@ -110,14 +112,32 @@ def _append_note(note: str | None, text: str) -> str:
 def pair_refund(conn: sqlite3.Connection, credit_id: int) -> int | None:
     """Match a credit to the purchase it refunds (same merchant and amount, up to 60 days earlier).
 
-    A purchase still in Review is Ignored along with the credit, so the pair nets to zero.
-    If the purchase was already classified, the credit goes to Review with a note instead,
-    so nothing that may already have been reimbursed changes silently.
+    Both are Ignored so the pair nets to zero, whatever the purchase was tagged as. This can
+    lower an already-settled month's totals; the purchase's note records what it was.
+
+    A same-merchant, same-amount charge within a day *after* the credit means a card hold
+    was released and re-charged, not a refund, so nothing is paired.
     Returns the matched purchase id, if any.
     """
     credit = conn.execute("SELECT * FROM transactions WHERE id = ?", (credit_id,)).fetchone()
     credit_time = datetime.fromisoformat(credit["transaction_datetime"])
     earliest = (credit_time - timedelta(days=REFUND_WINDOW_DAYS)).isoformat(timespec="seconds")
+    recharge_by = (credit_time + timedelta(days=1)).isoformat(timespec="seconds")
+    recharge = conn.execute(
+        """
+        SELECT transaction_datetime FROM transactions
+        WHERE merchant = ? COLLATE NOCASE AND ROUND(amount, 2) = ROUND(?, 2)
+          AND raw_text NOT LIKE '%pending credit from%'
+          AND transaction_datetime > ? AND transaction_datetime <= ?
+        """,
+        (credit["merchant"], credit["amount"], credit["transaction_datetime"], recharge_by),
+    ).fetchone()
+    if recharge:
+        conn.execute(
+            "UPDATE transactions SET note = ?, updated_at = ? WHERE id = ?",
+            (_append_note(credit["note"], f"Hold released and re-charged on {recharge[0][:10]}"), utc_now(), credit_id),
+        )
+        return None
     purchase = conn.execute(
         """
         SELECT id, status, transaction_datetime, note FROM transactions
@@ -136,22 +156,15 @@ def pair_refund(conn: sqlite3.Connection, credit_id: int) -> int | None:
         return None
     purchase_date = purchase["transaction_datetime"][:10]
     credit_date = credit["transaction_datetime"][:10]
-    if purchase["status"] == "Review":
-        conn.execute(
-            "UPDATE transactions SET status = 'Ignored', joint_amount = 0, subcategory = NULL, note = ?, updated_at = ? "
-            "WHERE id = ?",
-            (_append_note(purchase["note"], f"Refunded on {credit_date}"), utc_now(), purchase["id"]),
-        )
-        credit_status, credit_note = "Ignored", f"Refund of purchase on {purchase_date}"
-    else:
-        credit_status = "Review"
-        credit_note = (
-            f"Possible refund of the {purchase['status']} purchase on {purchase_date}. "
-            "If so, Ignore both."
-        )
+    was = purchase["status"]
     conn.execute(
-        "UPDATE transactions SET status = ?, note = ?, updated_at = ? WHERE id = ?",
-        (credit_status, _append_note(credit["note"], credit_note), utc_now(), credit_id),
+        "UPDATE transactions SET status = 'Ignored', joint_amount = 0, subcategory = NULL, note = ?, updated_at = ? "
+        "WHERE id = ?",
+        (_append_note(purchase["note"], f"Refunded on {credit_date} (was {was})"), utc_now(), purchase["id"]),
+    )
+    conn.execute(
+        "UPDATE transactions SET status = 'Ignored', note = ?, updated_at = ? WHERE id = ?",
+        (_append_note(credit["note"], f"Refund of purchase on {purchase_date}"), utc_now(), credit_id),
     )
     return int(purchase["id"])
 
