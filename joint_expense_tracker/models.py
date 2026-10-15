@@ -18,4 +18,7 @@ class ParsedAlert:
     account_name: str | None = None
     status: str = "Review"
     joint_amount: float = 0.0
+    # Category name; the column is called `subcategory` for historical reasons.
     subcategory: str | None = None
+    # True for refunds/credits ("pending credit from ..."), which get paired with their purchase on import.
+    is_credit: bool = False

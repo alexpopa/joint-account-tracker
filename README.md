@@ -126,6 +126,16 @@ For any month, Spending shows:
 6. Add any purchase that didn't send an alert with **+ Add transaction** on Transactions.
 7. Check the Dashboard totals, move the money, and look at Spending.
 
+### Refunds
+
+When a refund alert ("pending credit from …") arrives, the app looks for the
+matching purchase: same merchant, same amount, within the previous 60 days.
+
+- If that purchase is still in Review, both are marked Ignored, with notes.
+- If you already classified it, the refund goes to Review with a note pointing at the
+  purchase. That way the app never silently changes a total you may already have acted
+  on. If it was a full refund, Ignore both.
+
 ### Rules
 
 Rules match text in the merchant and/or raw alert and set a status, an optional

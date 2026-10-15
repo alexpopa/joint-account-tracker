@@ -156,6 +156,23 @@ def test_rules_can_classify_wife_spending(conn) -> None:
     assert apply_rules(conn, alert).status == "Wife"
 
 
+def test_rules_do_not_override_ignored_credits(conn) -> None:
+    add_rule(conn, "PSE&G", "Joint")
+    credit = ParsedAlert(
+        30,
+        "PSE&G",
+        None,
+        "2026-07-12T12:00:00-04:00",
+        "2026-07",
+        "Chase: A pending credit from PSE&G of $30.00",
+        status="Ignored",
+        is_credit=True,
+        source_guid="g1",
+    )
+
+    assert insert_alert(conn, credit)
+    assert conn.execute("SELECT status, joint_amount FROM transactions").fetchone()[:] == ("Ignored", 0)
+
 
 def test_edit_tip_amount_updates_percent_and_joint_amount(conn) -> None:
     tx_id = add_transaction(conn, 80.18)

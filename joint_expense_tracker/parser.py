@@ -172,4 +172,5 @@ def parse_alert(
         source_date_raw=str(message_date_raw) if message_date_raw is not None else None,
         account_name=extract_account_name(text),
         status=default_status_for_alert(text),
+        is_credit=PENDING_CREDIT_RE.search(text) is not None,
     )

@@ -147,7 +147,8 @@ def import_messages() -> ImportResult:
             snapshot = copy_messages_snapshot(messages_path)
             with _open_snapshot_readonly(snapshot) as snapshot_conn:
                 rows = _candidate_messages(snapshot_conn, senders, keywords)
-                for row in rows:
+                # Candidates are newest-first; insert purchases before later refunds.
+                for row in reversed(rows):
                     text = _message_text(row)
                     if not _matches_filters(text, row["sender"], senders, keywords):
                         continue

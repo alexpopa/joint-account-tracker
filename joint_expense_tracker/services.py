@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import csv
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +20,7 @@ from .rules import (
 
 UNCATEGORIZED = "Uncategorized"
 PRESENT = status_label("Wife")
+REFUND_WINDOW_DAYS = 60
 
 # How much of a transaction is joint vs. the owner's own spending. Venmo ("Her") is neither:
 # it's paid back by the partner. Personal spending includes tips and the non-joint part of a Split.
@@ -60,9 +61,11 @@ def insert_alert(conn: sqlite3.Connection, alert: ParsedAlert) -> bool:
     if _already_imported(conn, alert):
         return False
     alert.account_name = account_name_for(conn, alert.card_last4) or alert.account_name
-    alert = apply_rules(conn, alert)
+    # Card payments, deposits, and credits stay Ignored; rules only classify purchases.
+    if alert.status != "Ignored":
+        alert = apply_rules(conn, alert)
     now = utc_now()
-    conn.execute(
+    cursor = conn.execute(
         """
         INSERT INTO transactions (
             source_message_id, source_guid, source_sender, source_date_raw,
@@ -90,7 +93,64 @@ def insert_alert(conn: sqlite3.Connection, alert: ParsedAlert) -> bool:
             save_category(conn, alert.status, alert.subcategory),
         ),
     )
+    if alert.is_credit:
+        pair_refund(conn, int(cursor.lastrowid))
     return True
+
+
+
+def _append_note(note: str | None, text: str) -> str:
+    return f"{note} · {text}" if note else text
+
+
+
+def pair_refund(conn: sqlite3.Connection, credit_id: int) -> int | None:
+    """Match a credit to the purchase it refunds (same merchant and amount, up to 60 days earlier).
+
+    A purchase still in Review is Ignored along with the credit, so the pair nets to zero.
+    If the purchase was already classified, the credit goes to Review with a note instead,
+    so nothing that may already have been reimbursed changes silently.
+    Returns the matched purchase id, if any.
+    """
+    credit = conn.execute("SELECT * FROM transactions WHERE id = ?", (credit_id,)).fetchone()
+    credit_time = datetime.fromisoformat(credit["transaction_datetime"])
+    earliest = (credit_time - timedelta(days=REFUND_WINDOW_DAYS)).isoformat(timespec="seconds")
+    purchase = conn.execute(
+        """
+        SELECT id, status, transaction_datetime, note FROM transactions
+        WHERE id != ?
+          AND merchant = ? COLLATE NOCASE
+          AND ROUND(amount, 2) = ROUND(?, 2)
+          AND status != 'Ignored'
+          AND raw_text NOT LIKE '%pending credit from%'
+          AND transaction_datetime BETWEEN ? AND ?
+        ORDER BY transaction_datetime DESC
+        LIMIT 1
+        """,
+        (credit_id, credit["merchant"], credit["amount"], earliest, credit["transaction_datetime"]),
+    ).fetchone()
+    if not purchase:
+        return None
+    purchase_date = purchase["transaction_datetime"][:10]
+    credit_date = credit["transaction_datetime"][:10]
+    if purchase["status"] == "Review":
+        conn.execute(
+            "UPDATE transactions SET status = 'Ignored', joint_amount = 0, subcategory = NULL, note = ?, updated_at = ? "
+            "WHERE id = ?",
+            (_append_note(purchase["note"], f"Refunded on {credit_date}"), utc_now(), purchase["id"]),
+        )
+        credit_status, credit_note = "Ignored", f"Refund of purchase on {purchase_date}"
+    else:
+        credit_status = "Review"
+        credit_note = (
+            f"Possible refund of the {status_label(purchase['status'])} purchase on {purchase_date}. "
+            "If so, Ignore both."
+        )
+    conn.execute(
+        "UPDATE transactions SET status = ?, note = ?, updated_at = ? WHERE id = ?",
+        (credit_status, _append_note(credit["note"], credit_note), utc_now(), credit_id),
+    )
+    return int(purchase["id"])
 
 
 

@@ -107,3 +107,95 @@ def test_reused_message_rowid_is_still_imported(conn) -> None:
     assert insert_alert(conn, reused_rowid)
     assert conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == 2
 
+
+
+def credit(amount: float, merchant: str, when: str, guid: str) -> ParsedAlert:
+    return ParsedAlert(
+        amount,
+        merchant,
+        None,
+        when,
+        when[:7],
+        f"Chase: A pending credit from {merchant} of ${amount}",
+        status="Ignored",
+        is_credit=True,
+        source_guid=guid,
+    )
+
+
+
+def purchase(conn, amount: float, merchant: str, when: str, status: str = "Review") -> int:
+    return conn.execute(
+        "INSERT INTO transactions (transaction_datetime, month, amount, merchant, status, joint_amount, raw_text) "
+        "VALUES (?, ?, ?, ?, ?, ?, 'You made a transaction')",
+        (when, when[:7], amount, merchant, status, amount if status == "Joint" else 0),
+    ).lastrowid
+
+
+
+def status_and_note(conn, tx_id: int) -> tuple[str, str | None]:
+    return tuple(conn.execute("SELECT status, note FROM transactions WHERE id = ?", (tx_id,)).fetchone())
+
+
+
+def test_refund_ignores_unreviewed_purchase(conn) -> None:
+    bought = purchase(conn, 23.45, "SP REDRAGONSHOP", "2026-09-13T10:00:00-04:00")
+    assert insert_alert(conn, credit(23.45, "SP REDRAGONSHOP", "2026-09-15T07:12:30-04:00", "c1"))
+    credit_id = conn.execute("SELECT MAX(id) FROM transactions").fetchone()[0]
+
+    assert status_and_note(conn, bought) == ("Ignored", "Refunded on 2026-09-15")
+    assert status_and_note(conn, credit_id) == ("Ignored", "Refund of purchase on 2026-09-13")
+
+
+
+def test_refund_of_classified_purchase_is_flagged_not_changed(conn) -> None:
+    bought = purchase(conn, 4.99, "SHOPRITE HOBOKEN S1", "2026-08-20T09:00:00-04:00", status="Joint")
+    insert_alert(conn, credit(4.99, "SHOPRITE HOBOKEN S1", "2026-08-20T18:13:13-04:00", "c2"))
+    credit_id = conn.execute("SELECT MAX(id) FROM transactions").fetchone()[0]
+
+    assert status_and_note(conn, bought) == ("Joint", None)
+    status, note = status_and_note(conn, credit_id)
+    assert status == "Review"
+    assert "Joint purchase on 2026-08-20" in note
+
+
+
+def test_refund_without_matching_purchase_stays_ignored(conn) -> None:
+    purchase(conn, 99, "OTHER STORE", "2026-09-01T10:00:00-04:00")
+    purchase(conn, 23.45, "SP REDRAGONSHOP", "2026-05-01T10:00:00-04:00")  # outside the 60-day window
+    insert_alert(conn, credit(23.45, "SP REDRAGONSHOP", "2026-09-15T07:12:30-04:00", "c3"))
+    credit_id = conn.execute("SELECT MAX(id) FROM transactions").fetchone()[0]
+    assert status_and_note(conn, credit_id) == ("Ignored", None)
+
+
+
+def test_import_pairs_refund_when_purchase_is_in_the_same_batch(client, monkeypatch) -> None:
+    from joint_expense_tracker import importer
+
+    rows = [
+        {
+            "message_rowid": 2,
+            "guid": "batch-credit",
+            "sender": "24273",
+            "date_raw": apple_nanoseconds(datetime(2026, 9, 15, 12, tzinfo=UTC)),
+            "text": "Chase Freedom Visa: You have a $23.45 pending credit from SAMPLE SHOP.",
+        },
+        {
+            "message_rowid": 1,
+            "guid": "batch-purchase",
+            "sender": "24273",
+            "date_raw": apple_nanoseconds(datetime(2026, 9, 13, 12, tzinfo=UTC)),
+            "text": "Chase Freedom Visa: You made a $23.45 transaction with SAMPLE SHOP on Sep 13, 2026 at 8:00 AM ET.",
+        },
+    ]
+    monkeypatch.setattr(importer, "copy_messages_snapshot", lambda _: config.DB_PATH)
+    monkeypatch.setattr(importer, "_open_snapshot_readonly", lambda _: sqlite3.connect(":memory:"))
+    monkeypatch.setattr(importer, "_candidate_messages", lambda *args: rows)
+
+    result = importer.import_messages()
+    assert result.error is None and result.messages_imported == 2
+    with get_db(config.DB_PATH) as conn:
+        transactions = list(conn.execute("SELECT status, note FROM transactions ORDER BY source_message_id"))
+    assert [tx["status"] for tx in transactions] == ["Ignored", "Ignored"]
+    assert all(tx["note"] for tx in transactions)
+
