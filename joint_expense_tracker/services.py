@@ -41,42 +41,56 @@ def account_name_for(conn: sqlite3.Connection, card_last4: str | None) -> str | 
     return str(row["account_name"]) if row else None
 
 
+def _already_imported(conn: sqlite3.Connection, alert: ParsedAlert) -> bool:
+    if alert.source_guid:
+        query, key = "SELECT 1 FROM transactions WHERE source_guid = ?", alert.source_guid
+    elif alert.source_message_id:
+        query, key = (
+            "SELECT 1 FROM transactions WHERE source_guid IS NULL AND source_message_id = ?",
+            alert.source_message_id,
+        )
+    else:
+        return False
+    return conn.execute(query, (key,)).fetchone() is not None
+
+
+
 def insert_alert(conn: sqlite3.Connection, alert: ParsedAlert) -> bool:
+    """Insert a parsed alert unless it was already imported. Returns True if a row was added."""
+    if _already_imported(conn, alert):
+        return False
     alert.account_name = account_name_for(conn, alert.card_last4) or alert.account_name
     alert = apply_rules(conn, alert)
     now = utc_now()
-    try:
-        conn.execute(
-            """
-            INSERT INTO transactions (
-                source_message_id, source_guid, source_sender, source_date_raw,
-                transaction_datetime, month, amount, merchant, card_last4,
-                account_name, status, joint_amount, raw_text, created_at, updated_at, subcategory
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                alert.source_message_id,
-                alert.source_guid,
-                alert.source_sender,
-                alert.source_date_raw,
-                alert.transaction_datetime,
-                alert.month,
-                alert.amount,
-                alert.merchant,
-                alert.card_last4,
-                alert.account_name,
-                alert.status,
-                round(alert.joint_amount, 2),
-                alert.raw_text,
-                now,
-                now,
-                save_category(conn, alert.status, alert.subcategory),
-            ),
+    conn.execute(
+        """
+        INSERT INTO transactions (
+            source_message_id, source_guid, source_sender, source_date_raw,
+            transaction_datetime, month, amount, merchant, card_last4,
+            account_name, status, joint_amount, raw_text, created_at, updated_at, subcategory
         )
-        return True
-    except sqlite3.IntegrityError:
-        return False
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            alert.source_message_id,
+            alert.source_guid,
+            alert.source_sender,
+            alert.source_date_raw,
+            alert.transaction_datetime,
+            alert.month,
+            alert.amount,
+            alert.merchant,
+            alert.card_last4,
+            alert.account_name,
+            alert.status,
+            round(alert.joint_amount, 2),
+            alert.raw_text,
+            now,
+            now,
+            save_category(conn, alert.status, alert.subcategory),
+        ),
+    )
+    return True
 
 
 

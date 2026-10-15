@@ -56,7 +56,7 @@ def get_db(db_path: Path = DB_PATH) -> Iterator[sqlite3.Connection]:
 TRANSACTIONS_TABLE = """
 CREATE TABLE IF NOT EXISTS {name} (
     id INTEGER PRIMARY KEY,
-    source_message_id TEXT UNIQUE,
+    source_message_id TEXT,
     source_guid TEXT,
     source_sender TEXT,
     source_date_raw TEXT,
@@ -142,6 +142,8 @@ CREATE TABLE IF NOT EXISTS personal_subcategories (name TEXT PRIMARY KEY COLLATE
 )
 
 INDEXES = """
+CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_source_guid
+    ON transactions(source_guid) WHERE source_guid IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_transactions_month_status ON transactions(month, status);
 """
 
@@ -212,8 +214,6 @@ def _migration_cleanup_defaults(conn: sqlite3.Connection) -> None:
     )
 
 
-
-
 def _migration_local_time(conn: sqlite3.Connection) -> None:
     """Re-express imported UTC timestamps in Eastern time so late-evening purchases land in the right month."""
     rows = conn.execute(
@@ -227,12 +227,38 @@ def _migration_local_time(conn: sqlite3.Connection) -> None:
         )
 
 
+def _migration_dedupe_by_guid(conn: sqlite3.Connection) -> None:
+    """Deduplicate imports by the permanent Messages GUID instead of the reusable ROWID.
+
+    Old databases declared `source_message_id UNIQUE`, which SQLite can only drop by
+    rebuilding the table.
+    """
+    unique_on_rowid = any(
+        index["unique"]
+        and [info["name"] for info in conn.execute(f"PRAGMA index_info('{index['name']}')")] == ["source_message_id"]
+        for index in conn.execute("PRAGMA index_list(transactions)")
+    )
+    duplicate = conn.execute(
+        "SELECT source_guid FROM transactions WHERE source_guid IS NOT NULL GROUP BY source_guid HAVING COUNT(*) > 1"
+    ).fetchone()
+    if duplicate:
+        raise RuntimeError(f"Cannot add unique GUID index: duplicate source_guid {duplicate[0]!r}")
+    if not unique_on_rowid:
+        return
+    columns = ", ".join(TRANSACTION_COLUMNS)
+    conn.execute("DROP TABLE IF EXISTS transactions_rebuild")
+    conn.execute(TRANSACTIONS_TABLE.format(name="transactions_rebuild"))
+    conn.execute(f"INSERT INTO transactions_rebuild ({columns}) SELECT {columns} FROM transactions")
+    conn.execute("DROP TABLE transactions")
+    conn.execute("ALTER TABLE transactions_rebuild RENAME TO transactions")
+
 
 # Each migration runs once, in order; PRAGMA user_version records how many have run.
 # Append new migrations to the end. Never edit or reorder ones that have shipped.
 MIGRATIONS = [
     _migration_cleanup_defaults,
     _migration_local_time,
+    _migration_dedupe_by_guid,
 ]
 
 

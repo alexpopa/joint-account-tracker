@@ -1,4 +1,6 @@
 import sqlite3
+from joint_expense_tracker.models import ParsedAlert
+from joint_expense_tracker.services import insert_alert
 from datetime import UTC, datetime
 from joint_expense_tracker.parser import parse_alert
 from joint_expense_tracker import config
@@ -85,4 +87,23 @@ def test_alert_month_uses_eastern_time() -> None:
     )
     assert alert.month == "2026-09"
     assert alert.transaction_datetime == "2026-09-30T21:30:00-04:00"
+
+
+
+def test_reused_message_rowid_is_still_imported(conn) -> None:
+    first = ParsedAlert(
+        10, "Store A", None, "2026-09-01T12:00:00-04:00", "2026-09", "raw", source_message_id="7", source_guid="guid-1"
+    )
+    same = ParsedAlert(
+        10, "Store A", None, "2026-09-01T12:00:00-04:00", "2026-09", "raw", source_message_id="7", source_guid="guid-1"
+    )
+    # After a Messages database rebuild, a different message can get the same ROWID.
+    reused_rowid = ParsedAlert(
+        12, "Store B", None, "2026-09-02T12:00:00-04:00", "2026-09", "raw", source_message_id="7", source_guid="guid-2"
+    )
+
+    assert insert_alert(conn, first)
+    assert not insert_alert(conn, same)
+    assert insert_alert(conn, reused_rowid)
+    assert conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == 2
 
