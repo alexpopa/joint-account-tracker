@@ -3,23 +3,33 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from .config import (
     BACKUP_DIR,
     BACKUPS_TO_KEEP,
+    CATEGORIZED_STATUSES,
     DB_PATH,
     DEFAULT_CHASE_KEYWORDS,
     DEFAULT_CHASE_SENDERS,
     DEFAULT_MESSAGES_DB,
+    STARTER_CATEGORIES,
     ensure_data_dirs,
 )
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+def local_now() -> datetime:
+    return datetime.now()
+
+
+def current_month() -> str:
+    return local_now().strftime("%Y-%m")
 
 
 def connect(db_path: Path = DB_PATH) -> sqlite3.Connection:
@@ -40,8 +50,10 @@ def get_db(db_path: Path = DB_PATH) -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS transactions (
+# Current shape of every table. Older databases are brought up to date by
+# _ensure_columns() and the numbered MIGRATIONS below.
+TRANSACTIONS_TABLE = """
+CREATE TABLE IF NOT EXISTS {name} (
     id INTEGER PRIMARY KEY,
     source_message_id TEXT UNIQUE,
     source_guid TEXT,
@@ -60,9 +72,36 @@ CREATE TABLE IF NOT EXISTS transactions (
     note TEXT,
     raw_text TEXT NOT NULL,
     created_at TEXT,
-    updated_at TEXT
+    updated_at TEXT,
+    subcategory TEXT
 );
+"""
+TRANSACTION_COLUMNS = [
+    "id",
+    "source_message_id",
+    "source_guid",
+    "source_sender",
+    "source_date_raw",
+    "transaction_datetime",
+    "month",
+    "amount",
+    "tip_percent",
+    "tip_amount",
+    "merchant",
+    "card_last4",
+    "account_name",
+    "status",
+    "joint_amount",
+    "note",
+    "raw_text",
+    "created_at",
+    "updated_at",
+    "subcategory",
+]
 
+SCHEMA = (
+    TRANSACTIONS_TABLE.format(name="transactions")
+    + """
 CREATE TABLE IF NOT EXISTS accounts (
     id INTEGER PRIMARY KEY,
     card_last4 TEXT UNIQUE,
@@ -78,7 +117,8 @@ CREATE TABLE IF NOT EXISTS rules (
     default_joint_percent REAL,
     default_joint_amount REAL,
     priority INTEGER DEFAULT 100,
-    active INTEGER DEFAULT 1
+    active INTEGER DEFAULT 1,
+    default_subcategory TEXT
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -94,15 +134,29 @@ CREATE TABLE IF NOT EXISTS import_runs (
     messages_imported INTEGER DEFAULT 0,
     error TEXT
 );
+
+-- Category names. The table name predates categories applying to Joint/Split spending.
+CREATE TABLE IF NOT EXISTS personal_subcategories (name TEXT PRIMARY KEY COLLATE NOCASE);
+"""
+)
+
+INDEXES = """
+CREATE INDEX IF NOT EXISTS idx_transactions_month_status ON transactions(month, status);
 """
 
+DEFAULT_SETTINGS = {
+    "messages_db_path": str(DEFAULT_MESSAGES_DB),
+    "chase_sender_filters": ",".join(DEFAULT_CHASE_SENDERS),
+    "chase_keyword_filters": ",".join(DEFAULT_CHASE_KEYWORDS),
+}
 
-DEFAULT_RULES = [
-    ("Sample Grocery", "merchant_or_raw", "Joint", None, None, 100, 1),
-    ("Sample Utility", "merchant_or_raw", "Joint", None, None, 100, 1),
-    ("Sample Game Store", "merchant_or_raw", "Personal", None, None, 100, 1),
-    ("Sample Online Shop", "merchant_or_raw", "Review", None, None, 100, 1),
-    ("Sample Warehouse", "merchant_or_raw", "Review", None, None, 100, 1),
+# Placeholder rules that older versions re-created on every startup.
+LEGACY_SAMPLE_RULES = [
+    "Sample Grocery",
+    "Sample Utility",
+    "Sample Game Store",
+    "Sample Online Shop",
+    "Sample Warehouse",
 ]
 
 
@@ -110,45 +164,60 @@ def init_db(db_path: Path = DB_PATH) -> None:
     ensure_data_dirs()
     with get_db(db_path) as conn:
         conn.executescript(SCHEMA)
-        _migrate_transactions(conn)
-        for table, column in [("transactions", "subcategory"), ("rules", "default_subcategory")]:
-            columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
-            if column not in columns:
-                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
-        conn.execute("CREATE TABLE IF NOT EXISTS personal_subcategories (name TEXT PRIMARY KEY COLLATE NOCASE)")
-        conn.executemany(
-            "INSERT OR IGNORE INTO personal_subcategories (name) VALUES (?)", [("Food",), ("Video games",)]
-        )
-        defaults: dict[str, Any] = {
-            "messages_db_path": str(DEFAULT_MESSAGES_DB),
-            "chase_sender_filters": ",".join(DEFAULT_CHASE_SENDERS),
-            "chase_keyword_filters": ",".join(DEFAULT_CHASE_KEYWORDS),
-            "polling_interval": "manual",
-        }
-        for key, value in defaults.items():
-            conn.execute(
-                "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
-                (key, value),
-            )
-        for rule in DEFAULT_RULES:
-            conn.execute(
-                """
-                INSERT INTO rules (
-                    match_text, match_field, default_status, default_joint_percent,
-                    default_joint_amount, priority, active
-                )
-                SELECT ?, ?, ?, ?, ?, ?, ?
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM rules WHERE lower(match_text) = lower(?)
-                )
-                """,
-                (*rule, rule[0]),
-            )
+        _ensure_columns(conn)
+        for key, value in DEFAULT_SETTINGS.items():
+            conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, value))
         conn.commit()
         _run_migrations(conn, db_path)
+        conn.executescript(INDEXES)
 
 
-MIGRATIONS = []
+def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _ensure_columns(conn: sqlite3.Connection) -> None:
+    """Add columns introduced after a table was first created."""
+    added = [
+        ("transactions", "tip_percent", "REAL"),
+        ("transactions", "tip_amount", "REAL NOT NULL DEFAULT 0"),
+        ("transactions", "subcategory", "TEXT"),
+        ("rules", "default_subcategory", "TEXT"),
+    ]
+    for table, column, definition in added:
+        if column not in _columns(conn, table):
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+def _migration_cleanup_defaults(conn: sqlite3.Connection) -> None:
+    """Drop sample rules and the unused polling setting; seed starter categories."""
+    conn.executemany(
+        "DELETE FROM rules WHERE match_text = ?",
+        [(name,) for name in LEGACY_SAMPLE_RULES],
+    )
+    conn.execute("DELETE FROM settings WHERE key = 'polling_interval'")
+    conn.executemany(
+        "INSERT OR IGNORE INTO personal_subcategories (name) VALUES (?)",
+        [(name,) for name in STARTER_CATEGORIES],
+    )
+    # "Food" was an old default seed, superseded by Groceries and Dining. Keep it if anything uses it.
+    conn.execute(
+        """
+        DELETE FROM personal_subcategories
+        WHERE name = 'Food'
+          AND NOT EXISTS (SELECT 1 FROM transactions WHERE subcategory = 'Food' COLLATE NOCASE)
+          AND NOT EXISTS (SELECT 1 FROM rules WHERE default_subcategory = 'Food' COLLATE NOCASE)
+        """
+    )
+
+
+
+
+# Each migration runs once, in order; PRAGMA user_version records how many have run.
+# Append new migrations to the end. Never edit or reorder ones that have shipped.
+MIGRATIONS = [
+    _migration_cleanup_defaults,
+]
 
 
 def _run_migrations(conn: sqlite3.Connection, db_path: Path) -> None:
@@ -179,7 +248,7 @@ def backup_database(db_path: Path = DB_PATH, *, label: str | None = None, backup
     if not db_path.exists():
         return None
     backup_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y-%m-%d")
+    stamp = local_now().strftime("%Y-%m-%d")
     target = backup_dir / (f"joint_expenses-{stamp}-{label}.sqlite" if label else f"joint_expenses-{stamp}.sqlite")
     if target.exists() and not label:
         return None
@@ -195,14 +264,6 @@ def backup_database(db_path: Path = DB_PATH, *, label: str | None = None, backup
         for old in daily[:-BACKUPS_TO_KEEP]:
             old.unlink()
     return target
-
-
-def _migrate_transactions(conn: sqlite3.Connection) -> None:
-    columns = {row["name"] for row in conn.execute("PRAGMA table_info(transactions)").fetchall()}
-    if "tip_percent" not in columns:
-        conn.execute("ALTER TABLE transactions ADD COLUMN tip_percent REAL")
-    if "tip_amount" not in columns:
-        conn.execute("ALTER TABLE transactions ADD COLUMN tip_amount REAL NOT NULL DEFAULT 0")
 
 
 def rows_to_dicts(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
@@ -224,13 +285,24 @@ def set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
     )
 
 
-def personal_subcategories(conn: sqlite3.Connection) -> list[str]:
+def categories(conn: sqlite3.Connection) -> list[str]:
     return [row["name"] for row in conn.execute("SELECT name FROM personal_subcategories ORDER BY name COLLATE NOCASE")]
 
 
-def save_subcategory(conn: sqlite3.Connection, status: str, name: str | None) -> str | None:
-    if status != "Personal" or not name or not name.strip():
+def save_category(conn: sqlite3.Connection, status: str, name: str | None) -> str | None:
+    """Register a category name (case-insensitively) and return its canonical spelling.
+
+    Returns None when the status doesn't carry categories or no name was given.
+    """
+    if status not in CATEGORIZED_STATUSES or not name or not name.strip():
         return None
     name = " ".join(name.split())[:80]
     conn.execute("INSERT OR IGNORE INTO personal_subcategories (name) VALUES (?)", (name,))
     return conn.execute("SELECT name FROM personal_subcategories WHERE name = ?", (name,)).fetchone()["name"]
+
+
+def delete_category(conn: sqlite3.Connection, name: str) -> None:
+    """Remove a category and clear it from any transactions and rules that used it."""
+    conn.execute("UPDATE transactions SET subcategory = NULL WHERE subcategory = ? COLLATE NOCASE", (name,))
+    conn.execute("UPDATE rules SET default_subcategory = NULL WHERE default_subcategory = ? COLLATE NOCASE", (name,))
+    conn.execute("DELETE FROM personal_subcategories WHERE name = ?", (name,))

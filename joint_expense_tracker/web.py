@@ -2,25 +2,33 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
 from datetime import date
 from pathlib import Path
-from typing import Optional
+from typing import Any
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .config import DATA_DIR, DEFAULT_CHASE_KEYWORDS, DEFAULT_CHASE_SENDERS, STATUSES
-from .db import get_db, init_db, rows_to_dicts, set_setting, utc_now, personal_subcategories, save_subcategory
+from .charts import stacked_columns
+from .config import (
+    CATEGORIZED_STATUSES,
+    DATA_DIR,
+    DEFAULT_CHASE_KEYWORDS,
+    DEFAULT_CHASE_SENDERS,
+    STATUSES,
+    status_label,
+)
+from .db import categories, delete_category, get_db, init_db, rows_to_dicts, save_category, set_setting, utc_now
 from .importer import diagnose_messages, import_messages
+from .rules import normalize_status
 from .services import (
-    analytics_data,
     classify_transaction,
     create_manual_transaction,
     dashboard_data,
     export_month,
+    spending_data,
     update_transaction,
 )
 
@@ -36,6 +44,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="Joint Expense Tracker", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
+templates.env.filters["status_label"] = status_label
+templates.env.filters["money"] = lambda value: f"${float(value or 0):,.2f}"
+templates.env.globals["categorized_statuses"] = sorted(CATEGORIZED_STATUSES)
 
 
 def render(request: Request, name: str, context: dict[str, Any]):
@@ -60,17 +71,24 @@ def optional_float(value: str | float | None, field_name: str) -> float | None:
 
 
 @app.get("/")
-def dashboard(request: Request, month: Optional[str] = None):
+def dashboard(request: Request, month: str | None = None):
     with get_db() as conn:
         data = dashboard_data(conn, month)
-    return render(request, "dashboard.html", {"request": request, **data})
+        data["categories"] = categories(conn)
+    return render(request, "dashboard.html", data)
+
+
+@app.get("/spending")
+def spending(request: Request, month: str | None = None, category: str | None = None):
+    with get_db() as conn:
+        data = spending_data(conn, month, category or None)
+    data["chart"] = stacked_columns(data["trend"], ["joint", "personal"])
+    return render(request, "spending.html", data)
 
 
 @app.get("/analytics")
-def analytics(request: Request, start_month: Optional[str] = None, end_month: Optional[str] = None):
-    with get_db() as conn:
-        data = analytics_data(conn, start_month, end_month)
-    return render(request, "analytics.html", {"request": request, **data})
+def analytics():
+    return redirect("/spending")
 
 
 @app.post("/import")
@@ -81,7 +99,7 @@ def import_now():
 
 @app.get("/diagnostics")
 def diagnostics(request: Request):
-    return render(request, "diagnostics.html", {"request": request, "lines": diagnose_messages()})
+    return render(request, "diagnostics.html", {"lines": diagnose_messages()})
 
 
 @app.get("/export")
@@ -93,11 +111,11 @@ def export(month: str):
 @app.get("/transactions")
 def transactions(
     request: Request,
-    month: Optional[str] = None,
-    status: Optional[str] = None,
-    account: Optional[str] = None,
-    q: Optional[str] = None,
-    subcategory: Optional[str] = None,
+    month: str | None = None,
+    status: str | None = None,
+    account: str | None = None,
+    q: str | None = None,
+    category: str | None = None,
 ):
     clauses = []
     params: list[str] = []
@@ -112,13 +130,13 @@ def transactions(
     if account:
         clauses.append("(card_last4 = ? OR account_name = ?)")
         params.extend([account, account])
-    if subcategory:
+    if category:
         clauses.append("subcategory = ? COLLATE NOCASE")
-        params.append(subcategory)
+        params.append(category)
     if q:
         clauses.append("(merchant LIKE ? OR raw_text LIKE ?)")
         params.extend([f"%{q}%", f"%{q}%"])
-    where = "WHERE " + " AND ".join(clauses) if clauses else ""
+    where = "WHERE " + " AND ".join(clauses)
     with get_db() as conn:
         rows = rows_to_dicts(
             conn.execute(
@@ -126,31 +144,32 @@ def transactions(
                 params,
             ).fetchall()
         )
-        categories = personal_subcategories(conn)
-        all_months = rows_to_dicts(
-            conn.execute("SELECT DISTINCT month FROM transactions ORDER BY month DESC").fetchall()
-        )
+        all_months = [
+            row["month"] for row in conn.execute("SELECT DISTINCT month FROM transactions ORDER BY month DESC")
+        ]
         accounts = rows_to_dicts(
             conn.execute("SELECT * FROM accounts WHERE active = 1 ORDER BY account_name").fetchall()
         )
+        category_names = categories(conn)
+    filters = {
+        "month": month or "",
+        "status": status or "",
+        "account": account or "",
+        "q": q or "",
+        "category": category or "",
+    }
     return render(
         request,
         "transactions.html",
         {
-            "request": request,
             "transactions": rows,
-            "months": [row["month"] for row in all_months],
+            "months": all_months,
             "accounts": accounts,
             "statuses": STATUSES,
-            "subcategories": categories,
+            "categories": category_names,
             "today": date.today().isoformat(),
-            "filters": {
-                "month": month or "",
-                "status": status or "",
-                "account": account or "",
-                "q": q or "",
-                "subcategory": subcategory or "",
-            },
+            "filters": filters,
+            "return_to": str(request.url.path) + (f"?{request.url.query}" if request.url.query else ""),
         },
     )
 
@@ -164,7 +183,7 @@ def create_transaction(
     status: str = Form("Review"),
     joint_amount: str = Form(""),
     note: str = Form(""),
-    subcategory: str = Form(""),
+    category: str = Form(""),
 ):
     try:
         date.fromisoformat(transaction_date)
@@ -185,7 +204,7 @@ def create_transaction(
             status,
             optional_float(joint_amount, "joint_amount"),
             note,
-            subcategory,
+            category,
         )
     return redirect("/transactions")
 
@@ -194,18 +213,22 @@ def create_transaction(
 def classify(
     transaction_id: int,
     status: str = Form(...),
-    joint_amount: Optional[str] = Form(None),
-    tip_percent: Optional[str] = Form(None),
-    tip_amount: Optional[str] = Form(None),
+    joint_amount: str | None = Form(None),
+    tip_percent: str | None = Form(None),
+    tip_amount: str | None = Form(None),
+    category: str | None = Form(None),
     return_to: str = Form("/transactions"),
 ):
-    classify_transaction(
-        transaction_id,
-        status,
-        optional_float(joint_amount, "joint_amount"),
-        optional_float(tip_percent, "tip_percent"),
-        optional_float(tip_amount, "tip_amount"),
-    )
+    with get_db() as conn:
+        classify_transaction(
+            conn,
+            transaction_id,
+            status,
+            optional_float(joint_amount, "joint_amount"),
+            optional_float(tip_percent, "tip_percent"),
+            optional_float(tip_amount, "tip_amount"),
+            category,
+        )
     return redirect(return_to)
 
 
@@ -215,11 +238,11 @@ def edit_transaction(request: Request, transaction_id: int):
         row = conn.execute("SELECT * FROM transactions WHERE id = ?", (transaction_id,)).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Transaction not found")
-        categories = personal_subcategories(conn)
+        category_names = categories(conn)
     return render(
         request,
         "transaction_edit.html",
-        {"request": request, "transaction": dict(row), "statuses": STATUSES, "subcategories": categories},
+        {"transaction": dict(row), "statuses": STATUSES, "categories": category_names},
     )
 
 
@@ -234,7 +257,7 @@ def save_transaction(
     tip_percent: str = Form(""),
     tip_amount: str = Form(""),
     note: str = Form(""),
-    subcategory: str = Form(""),
+    category: str = Form(""),
 ):
     with get_db() as conn:
         update_transaction(
@@ -249,7 +272,7 @@ def save_transaction(
                 "tip_percent": tip_percent,
                 "tip_amount": tip_amount,
                 "note": note,
-                "subcategory": subcategory,
+                "category": category,
             },
         )
     return redirect("/transactions")
@@ -259,7 +282,7 @@ def save_transaction(
 def accounts(request: Request):
     with get_db() as conn:
         rows = rows_to_dicts(conn.execute("SELECT * FROM accounts ORDER BY active DESC, account_name").fetchall())
-    return render(request, "accounts.html", {"request": request, "accounts": rows})
+    return render(request, "accounts.html", {"accounts": rows})
 
 
 @app.post("/accounts")
@@ -283,10 +306,8 @@ def save_account(card_last4: str = Form(...), account_name: str = Form(...), act
 def rules(request: Request):
     with get_db() as conn:
         rows = rows_to_dicts(conn.execute("SELECT * FROM rules ORDER BY active DESC, priority ASC, id ASC").fetchall())
-        categories = personal_subcategories(conn)
-    return render(
-        request, "rules.html", {"request": request, "rules": rows, "statuses": STATUSES, "subcategories": categories}
-    )
+        category_names = categories(conn)
+    return render(request, "rules.html", {"rules": rows, "statuses": STATUSES, "categories": category_names})
 
 
 @app.post("/rules")
@@ -294,12 +315,13 @@ def save_rule(
     match_text: str = Form(...),
     match_field: str = Form("merchant_or_raw"),
     default_status: str = Form(...),
-    default_subcategory: str = Form(""),
+    category: str = Form(""),
     default_joint_percent: str = Form(""),
     default_joint_amount: str = Form(""),
     priority: int = Form(100),
     active: int = Form(1),
 ):
+    default_status = normalize_status(default_status)
     with get_db() as conn:
         conn.execute(
             """
@@ -313,11 +335,11 @@ def save_rule(
                 match_text.strip(),
                 match_field,
                 default_status,
-                float(default_joint_percent) if default_joint_percent else None,
-                float(default_joint_amount) if default_joint_amount else None,
+                optional_float(default_joint_percent, "default_joint_percent"),
+                optional_float(default_joint_amount, "default_joint_amount"),
                 priority,
                 active,
-                save_subcategory(conn, default_status, default_subcategory),
+                save_category(conn, default_status, category),
             ),
         )
     return redirect("/rules")
@@ -330,20 +352,44 @@ def delete_rule(rule_id: int):
     return redirect("/rules")
 
 
+@app.post("/rules/{rule_id}/category")
+def set_rule_category(rule_id: int, category: str = Form("")):
+    with get_db() as conn:
+        rule = conn.execute("SELECT default_status FROM rules WHERE id = ?", (rule_id,)).fetchone()
+        if not rule:
+            raise HTTPException(status_code=404, detail="Rule not found")
+        conn.execute(
+            "UPDATE rules SET default_subcategory = ? WHERE id = ?",
+            (save_category(conn, rule["default_status"], category), rule_id),
+        )
+    return redirect("/rules")
+
+
 @app.get("/settings")
 def settings(request: Request):
     with get_db() as conn:
-        settings_rows = rows_to_dicts(conn.execute("SELECT * FROM settings ORDER BY key").fetchall())
-    settings_map = {row["key"]: row["value"] for row in settings_rows}
+        settings_map = {row["key"]: row["value"] for row in conn.execute("SELECT * FROM settings")}
+        usage = {
+            row["name"]: row["uses"]
+            for row in conn.execute(
+                """
+                SELECT c.name, COUNT(t.id) AS uses
+                FROM personal_subcategories c
+                LEFT JOIN transactions t ON t.subcategory = c.name COLLATE NOCASE
+                GROUP BY c.name
+                """
+            )
+        }
+        category_names = categories(conn)
     return render(
         request,
         "settings.html",
         {
-            "request": request,
             "settings": settings_map,
             "data_dir": DATA_DIR,
             "default_senders": ", ".join(DEFAULT_CHASE_SENDERS),
             "default_keywords": ", ".join(DEFAULT_CHASE_KEYWORDS),
+            "categories": [{"name": name, "uses": usage.get(name, 0)} for name in category_names],
         },
     )
 
@@ -353,27 +399,28 @@ def save_settings(
     messages_db_path: str = Form(...),
     chase_sender_filters: str = Form(...),
     chase_keyword_filters: str = Form(...),
-    polling_interval: str = Form("manual"),
 ):
     with get_db() as conn:
         set_setting(conn, "messages_db_path", messages_db_path)
         set_setting(conn, "chase_sender_filters", chase_sender_filters)
         set_setting(conn, "chase_keyword_filters", chase_keyword_filters)
-        set_setting(conn, "polling_interval", polling_interval or "manual")
+    return redirect("/settings")
+
+
+@app.post("/categories")
+def add_category(name: str = Form(...)):
+    with get_db() as conn:
+        save_category(conn, "Personal", name)
+    return redirect("/settings")
+
+
+@app.post("/categories/delete")
+def remove_category(name: str = Form(...)):
+    with get_db() as conn:
+        delete_category(conn, name)
     return redirect("/settings")
 
 
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     return {"ok": "true", "time": utc_now()}
-
-
-@app.post("/rules/{rule_id}/subcategory")
-def set_rule_subcategory(rule_id: int, default_subcategory: str = Form("")):
-    with get_db() as conn:
-        rule = conn.execute("SELECT default_status FROM rules WHERE id = ?", (rule_id,)).fetchone()
-        if not rule:
-            raise HTTPException(status_code=404, detail="Rule not found")
-        category = save_subcategory(conn, rule["default_status"], default_subcategory)
-        conn.execute("UPDATE rules SET default_subcategory = ? WHERE id = ?", (category, rule_id))
-    return redirect("/rules")

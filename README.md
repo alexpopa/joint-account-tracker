@@ -1,12 +1,13 @@
 # Joint Expense Tracker
 
-Local-only Mac app for importing Chase SMS purchase alerts from Apple Messages, classifying joint expenses, and exporting monthly reimbursement totals.
+Local Mac web app that imports Chase purchase SMS alerts from Apple Messages and lets
+you tag each purchase. It tells you how much to pull from the joint bank account each
+month, how much to request via Venmo, and where the money went by category.
 
 ## Privacy Model
 
-- Runs locally on your Mac.
-- Does not use Plaid, Chase APIs, cloud sync, or external services.
-- For this workspace, launch the web app for Tailscale access on port `8787`.
+- Runs locally on your Mac. Reachable from your other devices over Tailscale on port `8787`.
+- Doesn't use Plaid, Chase APIs, cloud sync, or other external services.
 - Stores app data in `~/.joint-expense-tracker/`.
 - Copies `chat.db`, `chat.db-wal`, and `chat.db-shm` into `~/.joint-expense-tracker/messages_snapshot/` before querying.
 - Opens the copied Messages database read-only.
@@ -14,7 +15,8 @@ Local-only Mac app for importing Chase SMS purchase alerts from Apple Messages, 
 
 ## Setup
 
-Requires uv and Python 3.15; `uv sync` installs the locked dependencies.
+Requires [uv](https://docs.astral.sh/uv/) (`brew install uv`). uv installs the right
+Python (3.15) and the dependencies:
 
 ```bash
 uv sync
@@ -25,16 +27,23 @@ uv run python -m joint_expense_tracker web --host 0.0.0.0 --port 8787
 
 Open `http://<tailscale-ip-or-hostname>:8787` from a Tailscale-connected device, or [http://127.0.0.1:8787](http://127.0.0.1:8787) on this Mac.
 
-## Commands
+### Run on login (LaunchAgent)
+
+`launchd/com.alexandrupopa.joint-expense-tracker.plist` keeps the web app running.
+Install it once:
 
 ```bash
-uv run python -m joint_expense_tracker init
-uv run python -m joint_expense_tracker diagnose-messages
-uv run python -m joint_expense_tracker import-messages
-uv run python -m joint_expense_tracker backup
-uv run python -m joint_expense_tracker export --month 2026-05
-uv run python -m joint_expense_tracker web --host 0.0.0.0 --port 8787
+cp launchd/com.alexandrupopa.joint-expense-tracker.plist ~/Library/LaunchAgents/
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.alexandrupopa.joint-expense-tracker.plist
 ```
+
+Restart it after code changes:
+
+```bash
+launchctl kickstart -k gui/$(id -u)/com.alexandrupopa.joint-expense-tracker
+```
+
+Logs are written to `launchd/manual-web.log` and `launchd/manual-web.err.log`.
 
 ## Full Disk Access
 
@@ -50,6 +59,17 @@ uv run python -m joint_expense_tracker diagnose-messages
 
 The diagnostic command prints whether `chat.db` exists, whether copying succeeded, and recent sender IDs with dollar-message counts. It does not dump full message text by default.
 
+## Commands
+
+```bash
+uv run python -m joint_expense_tracker init
+uv run python -m joint_expense_tracker diagnose-messages
+uv run python -m joint_expense_tracker import-messages
+uv run python -m joint_expense_tracker export --month 2026-05
+uv run python -m joint_expense_tracker backup
+uv run python -m joint_expense_tracker web --host 0.0.0.0 --port 8787
+```
+
 ## Data Files and Backups
 
 - App database: `~/.joint-expense-tracker/joint_expenses.sqlite`
@@ -63,36 +83,60 @@ before any database upgrade. Run `backup` for an extra copy anytime. To restore,
 the LaunchAgent, copy a backup over `joint_expenses.sqlite`, and start it again.
 Time Machine also covers this folder if it's enabled.
 
+## Statuses
+
+| Status | Use it for | Counts toward |
+|---|---|---|
+| Joint | Shared household expenses | Joint reimbursement (amount + tip) |
+| Split | Partly shared purchases | Joint (the part you enter), Personal (the rest) |
+| Venmo | Your wife used your card for herself | Venmo request (amount + tip) |
+| Personal | Your own spending | Personal spending |
+| Present | Gifts and treats for your wife | Personal spending, also shown on its own |
+| Review | Not decided yet (default for new imports) | Nothing |
+| Ignored | Card payments, deposits, refunds, noise | Nothing; hidden by default |
+
+Venmo and Present are stored internally as `Her` and `Wife`. Those names appear in CSV
+exports.
+
+## Categories
+
+Joint, Split, and Personal purchases can have a category (Groceries, Dining, Video
+games, ...). That powers the **Spending** page: "we spent $X on groceries from the joint
+account," "I spent $Y on video games." Pick a category from the dropdown next to the
+classify buttons, on the Edit page, or with a rule. Add or delete categories in
+Settings. Deleting one removes it from any transactions and rules that use it.
+
+## Spending page
+
+For any month, Spending shows:
+
+- the joint, personal, and Venmo totals, with the change from the previous month,
+- the joint vs. personal split,
+- joint and personal spending broken down by category (Present is its own line),
+- a single 12-month chart of joint vs. personal spending. Click a category to see just its trend.
+
 ## Workflow
 
-1. Import Chase SMS alerts from Messages.
-2. New transactions default to `Review` unless a rule classifies them.
+1. Import alerts (Dashboard → Import New Messages).
+2. New purchases start in Review unless a rule classifies them.
 3. Map card last4 values to friendly names on Accounts.
-4. Classify transactions as `Joint`, `Personal`, `Split`, `Review`, or `Ignored`.
-5. Classify gifts, dinners, and other spending for your wife as `Wife`; it remains included in Personal totals.
-6. Enter a manual joint amount for `Split`.
-7. View monthly totals and export CSVs.
+4. Classify each purchase. For restaurants, enter the tip before clicking Joint,
+   Personal, or Venmo. Pick a category if you like.
+5. For Split, enter the joint portion.
+6. Add any purchase that didn't send an alert with **+ Add transaction** on Transactions.
+7. Check the Dashboard totals, move the money, and look at Spending.
 
-## Tests
+### Rules
+
+Rules match text in the merchant and/or raw alert and set a status, an optional
+category, and an optional split for new imports. Lower priority numbers run first and
+the first match wins. Rules don't change transactions that were already imported, and
+they never apply to card payments or refunds.
+
+## Development
 
 ```bash
-uv run pytest
-uv run ruff check .
-uv run ruff format .
+uv run pytest          # tests
+uv run ruff check .    # lint
+uv run ruff format .   # format
 ```
-
-### Personal subcategories
-
-In Transactions, edit a Personal transaction and choose a Personal subcategory from the dropdown. Food and Video games are included to start; choose “+ Add new subcategory…” to create a name for reuse. You can also assign a subcategory when manually adding a Personal transaction, filter Transactions by it, and include it in CSV exports.
-
-Personal rules can assign subcategories to new imports. Existing Personal rules have an inline subcategory field and Save button. Updating a rule applies to future imports; existing transactions can be edited separately. Choosing “No subcategory” removes the assignment. Switching a transaction away from Personal clears its subcategory. Present and the Needs Review choices retain their existing behavior.
-
-### Monthly trends
-
-Open Trends to compare transaction counts and tracked amounts for every status by month. The default range covers twelve months through the latest transaction; choose From and To to change it. Missing months show zero transactions. Joint, Split, and Her use joint amounts; other statuses use original purchase amounts. Expand monthly detail for the underlying values.
-
-### Venmo display label
-
-The dashboard, transaction screens, and Trends display the stored `Her` status as Venmo. Existing records, form values, rules, and CSV exports retain `Her`; reimbursement calculations are unchanged.
-
-Personal spending includes tips and the non-joint remainder of Split purchases.

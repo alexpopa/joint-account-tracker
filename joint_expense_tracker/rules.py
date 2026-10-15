@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from .config import STATUSES
+from .config import CATEGORIZED_STATUSES, STATUSES
 from .models import ParsedAlert
 
 
@@ -55,12 +55,14 @@ def apply_rules(conn: sqlite3.Connection, alert: ParsedAlert) -> ParsedAlert:
         if match_text and match_text in haystack:
             status = normalize_status(str(row["default_status"]))
             alert.status = status
-            alert.subcategory = row["default_subcategory"] if status == "Personal" else None
+            alert.subcategory = row["default_subcategory"] if status in CATEGORIZED_STATUSES else None
             if status in {"Joint", "Her"}:
                 alert.joint_amount = alert.amount
             elif status == "Split":
                 if row["default_joint_amount"] is not None:
-                    alert.joint_amount = joint_amount_for_status(status, alert.amount, float(row["default_joint_amount"]))
+                    alert.joint_amount = joint_amount_for_status(
+                        status, alert.amount, float(row["default_joint_amount"])
+                    )
                 elif row["default_joint_percent"] is not None:
                     alert.joint_amount = joint_amount_for_status(
                         status,

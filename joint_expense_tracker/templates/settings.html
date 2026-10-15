@@ -5,8 +5,25 @@
   <label>Messages DB path <input name="messages_db_path" value="{{ settings.messages_db_path or '~/Library/Messages/chat.db' }}"></label>
   <label>Chase sender filters <input name="chase_sender_filters" value="{{ settings.chase_sender_filters or default_senders }}"></label>
   <label>Keyword filters <input name="chase_keyword_filters" value="{{ settings.chase_keyword_filters or default_keywords }}"></label>
-  <label>Polling interval <input name="polling_interval" value="{{ settings.polling_interval or 'manual' }}"></label>
   <p class="notice">If access fails, enable Full Disk Access for Terminal, Python, or your IDE in System Settings -> Privacy & Security -> Full Disk Access.</p>
   <button>Save Settings</button>
 </form>
+
+<h2>Categories</h2>
+<p class="section-note">Used for Joint, Split, and Personal spending. Deleting a category removes it from any transactions and rules that use it.</p>
+<form class="inline-create" method="post" action="/categories">
+  <input name="name" maxlength="80" placeholder="New category" aria-label="New category name" required>
+  <button>Add</button>
+</form>
+<div class="table-wrap narrow">
+  <table><thead><tr><th>Category</th><th class="money">Transactions</th><th></th></tr></thead><tbody>
+  {% for category in categories %}
+  <tr>
+    <td>{{ category.name }}</td>
+    <td class="money">{{ category.uses }}</td>
+    <td><form method="post" action="/categories/delete"><input type="hidden" name="name" value="{{ category.name }}"><button class="secondary">Delete</button></form></td>
+  </tr>
+  {% else %}<tr><td colspan="3">No categories yet.</td></tr>{% endfor %}
+  </tbody></table>
+</div>
 {% endblock %}

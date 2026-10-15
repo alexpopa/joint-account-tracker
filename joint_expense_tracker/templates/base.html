@@ -4,18 +4,15 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}Joint Expense Tracker{% endblock %}</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}?v=3">
+    <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}?v=5">
   </head>
   <body>
     <header class="topbar">
       <a class="brand" href="/">Joint Expense Tracker</a>
       <nav>
-        <a href="/">Dashboard</a>
-        <a href="/analytics" {% if request is defined and request.url.path == "/analytics" %}aria-current="page"{% endif %}>Trends</a>
-        <a href="/transactions">Transactions</a>
-        <a href="/accounts">Accounts</a>
-        <a href="/rules">Rules</a>
-        <a href="/settings">Settings</a>
+        {% for href, label in [("/", "Dashboard"), ("/spending", "Spending"), ("/transactions", "Transactions"), ("/accounts", "Accounts"), ("/rules", "Rules"), ("/settings", "Settings")] %}
+        <a href="{{ href }}" {% if request.url.path == href %}aria-current="page"{% endif %}>{{ label }}</a>
+        {% endfor %}
       </nav>
     </header>
     <main class="shell">

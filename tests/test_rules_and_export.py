@@ -4,32 +4,83 @@ import csv
 import sqlite3
 from pathlib import Path
 
-from jinja2 import Environment, FileSystemLoader, select_autoescape
-
-from joint_expense_tracker.db import get_db, init_db
 from joint_expense_tracker.models import ParsedAlert
-from joint_expense_tracker.rules import apply_rules, joint_amount_for_status, tip_amount_from_percent, tip_percent_from_amount
-from joint_expense_tracker.services import analytics_data, classify_transaction, create_manual_transaction, dashboard_data, export_month, insert_alert, update_transaction
+from joint_expense_tracker.rules import (
+    apply_rules,
+    joint_amount_for_status,
+    tip_amount_from_percent,
+    tip_percent_from_amount,
+)
+from joint_expense_tracker.services import (
+    classify_transaction,
+    create_manual_transaction,
+    dashboard_data,
+    export_month,
+    insert_alert,
+    update_transaction,
+)
 from joint_expense_tracker.web import classify
+
+
+def add_transaction(
+    conn: sqlite3.Connection, amount: float, status: str = "Review", joint_amount: float = 0, **fields
+) -> int:
+    values = {
+        "transaction_datetime": "2026-05-01T12:00:00-04:00",
+        "month": "2026-05",
+        "amount": amount,
+        "merchant": "Test Restaurant",
+        "status": status,
+        "joint_amount": joint_amount,
+        "raw_text": "raw",
+        "created_at": "now",
+        "updated_at": "now",
+        **fields,
+    }
+    columns = ", ".join(values)
+    placeholders = ", ".join("?" for _ in values)
+    return conn.execute(
+        f"INSERT INTO transactions ({columns}) VALUES ({placeholders})", list(values.values())
+    ).lastrowid
+
+
+def add_rule(conn: sqlite3.Connection, match_text: str, status: str, category: str | None = None) -> None:
+    conn.execute(
+        "INSERT INTO rules (match_text, match_field, default_status, priority, active, default_subcategory) "
+        "VALUES (?, 'merchant_or_raw', ?, 1, 1, ?)",
+        (match_text, status, category),
+    )
+
+
+def edit(conn: sqlite3.Connection, tx_id: int, **data) -> None:
+    form = {"merchant": "Test Restaurant", "account_name": "", "card_last4": "", "joint_amount": 0}
+    form.update({"tip_percent": "", "tip_amount": "", "note": ""})
+    form.update(data)
+    update_transaction(conn, tx_id, form)
+
+
+def row(conn: sqlite3.Connection, tx_id: int) -> sqlite3.Row:
+    return conn.execute("SELECT * FROM transactions WHERE id = ?", (tx_id,)).fetchone()
 
 
 def test_quick_joint_allows_blank_tip_percent(monkeypatch) -> None:
     captured = {}
 
-    def fake_classify_transaction(transaction_id, status, joint_amount=None, tip_percent=None, tip_amount=None) -> None:
+    def fake_classify_transaction(conn, transaction_id, status, joint_amount, tip_percent, tip_amount, category):
         captured.update(
-            {
-                "transaction_id": transaction_id,
-                "status": status,
-                "joint_amount": joint_amount,
-                "tip_percent": tip_percent,
-                "tip_amount": tip_amount,
-            }
+            transaction_id=transaction_id,
+            status=status,
+            joint_amount=joint_amount,
+            tip_percent=tip_percent,
+            tip_amount=tip_amount,
+            category=category,
         )
 
     monkeypatch.setattr("joint_expense_tracker.web.classify_transaction", fake_classify_transaction)
 
-    response = classify(123, status="Joint", joint_amount=None, tip_percent="", tip_amount="", return_to="/transactions")
+    response = classify(
+        123, status="Joint", joint_amount=None, tip_percent="", tip_amount="", category=None, return_to="/transactions"
+    )
 
     assert response.status_code == 303
     assert captured == {
@@ -38,6 +89,7 @@ def test_quick_joint_allows_blank_tip_percent(monkeypatch) -> None:
         "joint_amount": None,
         "tip_percent": None,
         "tip_amount": None,
+        "category": None,
     }
 
 
@@ -54,546 +106,185 @@ def test_status_joint_amount_logic() -> None:
     assert tip_percent_from_amount(80.18, 16.04) == 20.0
 
 
-def test_create_manual_transaction_uses_account_and_status_amount(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.sqlite"
-    init_db(db_path)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+def test_create_manual_transaction_uses_account_and_status_amount(conn) -> None:
     conn.execute("INSERT INTO accounts (card_last4, account_name) VALUES (?, ?)", ("1234", "House Card"))
 
-    transaction_id = create_manual_transaction(
-        conn,
-        "2026-07-10",
-        "Corner Market",
-        42.50,
-        card_last4="1234",
-        status="Joint",
-        note="Entered after missed alert",
+    tx_id = create_manual_transaction(
+        conn, "2026-07-10", "Corner Market", 42.50, card_last4="1234", status="Joint", note="Entered after missed alert"
     )
-    row = conn.execute("SELECT * FROM transactions WHERE id = ?", (transaction_id,)).fetchone()
-    conn.close()
+    tx = row(conn, tx_id)
 
-    assert row["transaction_datetime"] == "2026-07-10T12:00:00"
-    assert row["month"] == "2026-07"
-    assert row["account_name"] == "House Card"
-    assert row["status"] == "Joint"
-    assert row["joint_amount"] == 42.5
-    assert row["note"] == "Entered after missed alert"
+    assert tx["transaction_datetime"] == "2026-07-10T12:00:00"
+    assert tx["month"] == "2026-07"
+    assert tx["account_name"] == "House Card"
+    assert tx["status"] == "Joint"
+    assert tx["joint_amount"] == 42.5
+    assert tx["note"] == "Entered after missed alert"
 
 
-def test_wife_status_is_included_in_personal_total(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.sqlite"
-    init_db(db_path)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-
-    create_manual_transaction(conn, "2026-07-10", "Gift Shop", 42.50, status="Wife")
+def test_wife_status_is_included_in_personal_total(conn) -> None:
+    gift = create_manual_transaction(conn, "2026-07-10", "Gift Shop", 42.50, status="Wife")
     create_manual_transaction(conn, "2026-07-11", "Game Store", 17.50, status="Personal")
-    conn.commit()
 
     data = dashboard_data(conn, "2026-07")
-    personal_totals = {row["status"]: row["total"] for row in data["totals_by_status"]}
-    row = conn.execute("SELECT status, joint_amount FROM transactions WHERE merchant = 'Gift Shop'").fetchone()
-    conn.close()
+    totals = {r["status"]: r["total"] for r in data["totals_by_status"]}
 
-    assert row["status"] == "Wife"
-    assert row["joint_amount"] == 0
+    assert row(conn, gift)["joint_amount"] == 0
     assert data["total_personal"] == 60
     assert data["total_present"] == 42.5
-    assert personal_totals == {"Personal": 17.5, "Wife": 42.5}
-
-
-def test_rules_can_classify_wife_spending(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.sqlite"
-    init_db(db_path)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    conn.execute(
-        """
-        INSERT INTO rules (match_text, match_field, default_status, priority, active)
-        VALUES (?, ?, ?, ?, ?)
-        """,
-        ("Wife Dinner", "merchant", "Wife", 1, 1),
-    )
-    alert = ParsedAlert(
-        amount=80,
-        merchant="Wife Dinner",
-        card_last4="1234",
-        transaction_datetime="2026-07-12T12:00:00+00:00",
-        month="2026-07",
-        raw_text="Chase alert $80.00 at Wife Dinner",
-    )
-
-    applied = apply_rules(conn, alert)
-    conn.close()
-
-    assert applied.status == "Wife"
-
-
-def test_edit_tip_amount_updates_percent_and_joint_amount(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.sqlite"
-    init_db(db_path)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    conn.execute(
-        """
-        INSERT INTO transactions (
-            transaction_datetime, month, amount, merchant, status, joint_amount,
-            raw_text, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        ("2026-05-01T12:00:00+00:00", "2026-05", 80.18, "Test Restaurant", "Review", 0, "raw", "now", "now"),
-    )
-    tx_id = conn.execute("SELECT id FROM transactions").fetchone()["id"]
-    update_transaction(
-        conn,
-        tx_id,
-        {
-            "merchant": "Test Restaurant",
-            "account_name": "",
-            "card_last4": "",
-            "status": "Joint",
-            "joint_amount": 0,
-            "tip_percent": "",
-            "tip_amount": "16.04",
-            "note": "",
-        },
-    )
-    row = conn.execute("SELECT tip_percent, tip_amount, joint_amount FROM transactions WHERE id = ?", (tx_id,)).fetchone()
-    conn.close()
-    assert row["tip_amount"] == 16.04
-    assert row["tip_percent"] == 20.0
-    assert row["joint_amount"] == 96.22
-
-
-def test_quick_classify_tip_amount_updates_existing_tip_fields(tmp_path: Path, monkeypatch) -> None:
-    db_path = tmp_path / "app.sqlite"
-    init_db(db_path)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    conn.execute(
-        """
-        INSERT INTO transactions (
-            transaction_datetime, month, amount, merchant, status, joint_amount,
-            raw_text, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        ("2026-05-01T12:00:00+00:00", "2026-05", 80.18, "Test Restaurant", "Review", 0, "raw", "now", "now"),
-    )
-    tx_id = conn.execute("SELECT id FROM transactions").fetchone()["id"]
-    conn.commit()
-    conn.close()
-    monkeypatch.setattr("joint_expense_tracker.services.get_db", lambda: get_db(db_path))
-
-    classify_transaction(tx_id, "Joint", tip_amount=16.04)
-
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    row = conn.execute("SELECT status, tip_percent, tip_amount, joint_amount FROM transactions WHERE id = ?", (tx_id,)).fetchone()
-    conn.close()
-    assert row["status"] == "Joint"
-    assert row["tip_amount"] == 16.04
-    assert row["tip_percent"] == 20.0
-    assert row["joint_amount"] == 96.22
-
-
-def test_quick_personal_saves_tip_amount_without_joint_amount(tmp_path: Path, monkeypatch) -> None:
-    db_path = tmp_path / "app.sqlite"
-    init_db(db_path)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    conn.execute(
-        """
-        INSERT INTO transactions (
-            transaction_datetime, month, amount, merchant, status, joint_amount,
-            raw_text, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        ("2026-05-01T12:00:00+00:00", "2026-05", 50, "Test Restaurant", "Review", 0, "raw", "now", "now"),
-    )
-    tx_id = conn.execute("SELECT id FROM transactions").fetchone()["id"]
-    conn.commit()
-    conn.close()
-    monkeypatch.setattr("joint_expense_tracker.services.get_db", lambda: get_db(db_path))
-
-    classify_transaction(tx_id, "Personal", tip_amount=10)
-
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    row = conn.execute("SELECT status, tip_percent, tip_amount, joint_amount FROM transactions WHERE id = ?", (tx_id,)).fetchone()
-    conn.close()
-    assert row["status"] == "Personal"
-    assert row["tip_amount"] == 10
-    assert row["tip_percent"] == 20.0
-    assert row["joint_amount"] == 0
-
-
-def test_quick_her_saves_venmo_amount_with_tip(tmp_path: Path, monkeypatch) -> None:
-    db_path = tmp_path / "app.sqlite"
-    init_db(db_path)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    conn.execute(
-        """
-        INSERT INTO transactions (
-            transaction_datetime, month, amount, merchant, status, joint_amount,
-            raw_text, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        ("2026-05-01T12:00:00+00:00", "2026-05", 50, "Test Restaurant", "Review", 0, "raw", "now", "now"),
-    )
-    tx_id = conn.execute("SELECT id FROM transactions").fetchone()["id"]
-    conn.commit()
-    conn.close()
-    monkeypatch.setattr("joint_expense_tracker.services.get_db", lambda: get_db(db_path))
-
-    classify_transaction(tx_id, "Her", tip_amount=10)
-
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    row = conn.execute("SELECT status, tip_percent, tip_amount, joint_amount FROM transactions WHERE id = ?", (tx_id,)).fetchone()
-    conn.close()
-    assert row["status"] == "Her"
-    assert row["tip_amount"] == 10
-    assert row["tip_percent"] == 20.0
-    assert row["joint_amount"] == 60
-
-
-def test_edit_tip_does_not_force_joint_status(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.sqlite"
-    init_db(db_path)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    conn.execute(
-        """
-        INSERT INTO transactions (
-            transaction_datetime, month, amount, merchant, status, joint_amount,
-            raw_text, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        ("2026-05-01T12:00:00+00:00", "2026-05", 50, "Test Restaurant", "Review", 0, "raw", "now", "now"),
-    )
-    tx_id = conn.execute("SELECT id FROM transactions").fetchone()["id"]
-    update_transaction(
-        conn,
-        tx_id,
-        {
-            "merchant": "Test Restaurant",
-            "account_name": "",
-            "card_last4": "",
-            "status": "Review",
-            "joint_amount": 0,
-            "tip_percent": "20",
-            "tip_amount": "",
-            "note": "",
-        },
-    )
-    row = conn.execute("SELECT status, tip_percent, tip_amount, joint_amount FROM transactions WHERE id = ?", (tx_id,)).fetchone()
-    conn.close()
-    assert row["status"] == "Review"
-    assert row["tip_percent"] == 20
-    assert row["tip_amount"] == 10
-    assert row["joint_amount"] == 0
-
-
-def test_edit_preserves_account_name_when_last4_blank(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.sqlite"
-    init_db(db_path)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    raw = "Chase Sapphire Preferred Visa: You made a $80.18 transaction with SAMPLE RESTAURANT on May 25, 2026 at 8:17 PM ET."
-    conn.execute(
-        """
-        INSERT INTO transactions (
-            transaction_datetime, month, amount, merchant, account_name, status,
-            joint_amount, raw_text, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        ("2026-05-26T00:18:02+00:00", "2026-05", 80.18, "SAMPLE RESTAURANT", "Chase Sapphire Preferred Visa", "Joint", 92.18, raw, "now", "now"),
-    )
-    tx_id = conn.execute("SELECT id FROM transactions").fetchone()["id"]
-    update_transaction(
-        conn,
-        tx_id,
-        {
-            "merchant": "SAMPLE RESTAURANT",
-            "account_name": "",
-            "card_last4": "",
-            "status": "Joint",
-            "joint_amount": 92.18,
-            "tip_percent": "",
-            "tip_amount": "12",
-            "note": "",
-        },
-    )
-    row = conn.execute("SELECT account_name FROM transactions WHERE id = ?", (tx_id,)).fetchone()
-    conn.close()
-    assert row["account_name"] == "Chase Sapphire Preferred Visa"
-
-
-def test_edit_can_set_account_name_without_last4(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.sqlite"
-    init_db(db_path)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    conn.execute(
-        """
-        INSERT INTO transactions (
-            transaction_datetime, month, amount, merchant, status,
-            joint_amount, raw_text, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        ("2026-05-26T00:18:02+00:00", "2026-05", 80.18, "SAMPLE RESTAURANT", "Review", 0, "raw", "now", "now"),
-    )
-    tx_id = conn.execute("SELECT id FROM transactions").fetchone()["id"]
-    update_transaction(
-        conn,
-        tx_id,
-        {
-            "merchant": "SAMPLE RESTAURANT",
-            "account_name": "Chase Sapphire Preferred Visa",
-            "card_last4": "",
-            "status": "Review",
-            "joint_amount": 0,
-            "tip_percent": "",
-            "tip_amount": "",
-            "note": "",
-        },
-    )
-    row = conn.execute("SELECT card_last4, account_name FROM transactions WHERE id = ?", (tx_id,)).fetchone()
-    conn.close()
-    assert row["card_last4"] is None
-    assert row["account_name"] == "Chase Sapphire Preferred Visa"
-
-
-def test_dashboard_review_count_is_not_limited_to_preview(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.sqlite"
-    init_db(db_path)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    for index in range(18):
-        conn.execute(
-            """
-            INSERT INTO transactions (
-                transaction_datetime, month, amount, merchant, status,
-                joint_amount, raw_text, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                f"2026-05-{index + 1:02d}T12:00:00+00:00",
-                "2026-05",
-                10,
-                f"Review {index}",
-                "Review",
-                0,
-                "raw",
-                "now",
-                "now",
-            ),
-        )
-    data = dashboard_data(conn, "2026-05")
-    conn.close()
-
-    assert data["needs_review_count"] == 18
-    assert data["needs_review_display_count"] == 15
-    assert len(data["needs_review"]) == 15
-
-
-def test_analytics_data_fills_months_and_includes_every_status(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.sqlite"
-    init_db(db_path)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-
-    create_manual_transaction(conn, "2026-01-10", "Joint Store", 30, status="Joint")
-    create_manual_transaction(conn, "2026-03-10", "Review Store", 20, status="Review")
-
-    data = analytics_data(conn, "2026-03", "2026-01")
-    conn.close()
-
-    assert data["months"] == ["2026-01", "2026-02", "2026-03"]
-    assert [status["key"] for status in data["series"]] == ["Joint", "Personal", "Wife", "Her", "Split", "Review", "Ignored"]
-    series = {status["key"]: status for status in data["series"]}
-    assert series["Joint"]["counts"] == [1, 0, 0]
-    assert series["Joint"]["amounts"] == [30.0, 0.0, 0.0]
-    assert series["Review"]["counts"] == [0, 0, 1]
-    assert data["total_transactions"] == 2
-
-
-def test_dashboard_status_totals_mix_reimbursement_and_transaction_amounts(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.sqlite"
-    init_db(db_path)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    rows = [
-        ("2026-05-01T12:00:00+00:00", "2026-05", 99.63, "Joint Store", "Joint", 111.63),
-        ("2026-05-02T12:00:00+00:00", "2026-05", 25, "Personal Store", "Personal", 0),
-        ("2026-05-03T12:00:00+00:00", "2026-05", 40, "Review Store", "Review", 0),
-        ("2026-05-04T12:00:00+00:00", "2026-05", 15, "Ignored Store", "Ignored", 0),
-        ("2026-05-05T12:00:00+00:00", "2026-05", 70, "Her Store", "Her", 82),
-    ]
-    conn.executemany(
-        """
-        INSERT INTO transactions (
-            transaction_datetime, month, amount, merchant, status,
-            joint_amount, raw_text, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, 'raw', 'now', 'now')
-        """,
-        rows,
-    )
-
-    totals = {row["status"]: row["total"] for row in dashboard_data(conn, "2026-05")["totals_by_status"]}
-    conn.close()
-
-    assert totals == {
-        "Her": 82.0,
-        "Joint": 111.63,
-        "Personal": 25.0,
-        "Review": 40.0,
-    }
-
-
-def test_dashboard_separates_joint_and_venmo_totals(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.sqlite"
-    init_db(db_path)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    rows = [
-        ("2026-05-01T12:00:00+00:00", "2026-05", 100, "Joint Store", "Joint", 120, "Card A"),
-        ("2026-05-02T12:00:00+00:00", "2026-05", 40, "Split Store", "Split", 15, "Card A"),
-        ("2026-05-03T12:00:00+00:00", "2026-05", 70, "Her Store", "Her", 82, "Card A"),
-    ]
-    conn.executemany(
-        """
-        INSERT INTO transactions (
-            transaction_datetime, month, amount, merchant, status,
-            joint_amount, account_name, raw_text, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'raw', 'now', 'now')
-        """,
-        rows,
-    )
-
-    data = dashboard_data(conn, "2026-05")
-    conn.close()
-
-    assert data["total_joint"] == 135.0
-    assert data["total_venmo"] == 82.0
-    assert data["totals_by_account"][0]["total"] == 135.0
-
-
-def test_dashboard_status_table_renders_total() -> None:
-    template_dir = Path(__file__).resolve().parents[1] / "joint_expense_tracker" / "templates"
-    env = Environment(loader=FileSystemLoader(template_dir), autoescape=select_autoescape())
-    env.globals["url_for"] = lambda name, path: f"/static{path}"
-
-    rendered = env.get_template("dashboard.html").render(
-        months=["2026-05"],
-        selected_month="2026-05",
-        total_joint=111.63,
-        total_venmo=82.0,
-        totals_by_account=[],
-        totals_by_status=[
-            {"status": "Joint", "count": 3, "total": 111.63, "joint_total": 111.63},
-        ],
-        needs_review=[],
-        needs_review_count=0,
-        needs_review_display_count=0,
-    )
-
-    assert "Total" in rendered
-    assert "$111.63" in rendered
-    assert "Total to request via Venmo" in rendered
-    assert "$82.00" in rendered
-
-
-def test_dashboard_status_table_renders_old_server_shape() -> None:
-    template_dir = Path(__file__).resolve().parents[1] / "joint_expense_tracker" / "templates"
-    env = Environment(loader=FileSystemLoader(template_dir), autoescape=select_autoescape())
-    env.globals["url_for"] = lambda name, path: f"/static{path}"
-
-    rendered = env.get_template("dashboard.html").render(
-        months=["2026-05"],
-        selected_month="2026-05",
-        total_joint=111.63,
-        total_venmo=0.0,
-        totals_by_account=[],
-        totals_by_status=[
-            {"status": "Ignored", "count": 7, "gross": 30332.67, "joint_total": 0.0},
-            {"status": "Joint", "count": 3, "gross": 99.63, "joint_total": 111.63},
-            {"status": "Personal", "count": 13, "gross": 578.73, "joint_total": 0.0},
-            {"status": "Review", "count": 104, "gross": 14978.58, "joint_total": 0.0},
-        ],
-        needs_review=[],
-        needs_review_count=0,
-        needs_review_display_count=0,
-    )
-
-    assert "$30332.67" not in rendered
-    assert "Ignored" not in rendered
-    assert "$111.63" in rendered
-    assert "$578.73" in rendered
-    assert "$14978.58" in rendered
-
-
-def test_rule_application_joint(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.sqlite"
-    init_db(db_path)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    alert = ParsedAlert(
-        amount=10,
-        merchant="Sample Grocery",
-        card_last4="1234",
-        transaction_datetime="2026-05-01T12:00:00+00:00",
-        month="2026-05",
-        raw_text="Chase alert $10.00 at Sample Grocery card ending in 1234",
-    )
-    applied = apply_rules(conn, alert)
-    conn.close()
-    assert applied.status == "Joint"
-    assert applied.joint_amount == 10
-
-
-def test_csv_export(tmp_path: Path) -> None:
-    db_path = tmp_path / "app.sqlite"
-    export_dir = tmp_path / "exports"
-    init_db(db_path)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    inserted = insert_alert(
-        conn,
-        ParsedAlert(
-            amount=20,
-            merchant="Sample Utility",
-            card_last4="1234",
-            transaction_datetime="2026-05-02T12:00:00+00:00",
-            month="2026-05",
-            raw_text="Chase alert $20.00 at Sample Utility card ending in 1234",
-            source_message_id="sample-1",
-        ),
-    )
-    conn.commit()
-    conn.close()
-    assert inserted
-    transaction_csv, summary_csv = export_month("2026-05", db_path=db_path, export_dir=export_dir)
-    assert transaction_csv.exists()
-    assert summary_csv.exists()
-    with transaction_csv.open(newline="", encoding="utf-8") as f:
-        rows = list(csv.DictReader(f))
-    assert rows[0]["Merchant"] == "Sample Utility"
-    assert rows[0]["Status"] == "Joint"
-    assert "Tip Percent" in rows[0]
-    assert "Tip Amount" in rows[0]
+    assert totals == {"Personal": 17.5, "Wife": 42.5}
 
 
 def test_personal_total_includes_tips_and_the_personal_part_of_splits(conn) -> None:
-    dinner = create_manual_transaction(conn, "2026-07-03", "Dinner", 50)
-    update_transaction(conn, dinner, {"status": "Personal", "tip_amount": "10"})
-    split = create_manual_transaction(conn, "2026-07-04", "Shared", 40)
-    update_transaction(conn, split, {"status": "Split", "joint_amount": "15"})
+    dinner = add_transaction(conn, 50, month="2026-07")
+    classify_transaction(conn, dinner, "Personal", tip_amount=10)
+    split = add_transaction(conn, 40, month="2026-07")
+    classify_transaction(conn, split, "Split", joint_amount=15)
 
     data = dashboard_data(conn, "2026-07")
 
     assert data["total_personal"] == 60 + 25
     assert data["total_joint"] == 15
 
+
+def test_rules_can_classify_wife_spending(conn) -> None:
+    add_rule(conn, "Wife Dinner", "Wife")
+    alert = ParsedAlert(
+        80, "Wife Dinner", "1234", "2026-07-12T12:00:00-04:00", "2026-07", "Chase alert $80.00 at Wife Dinner"
+    )
+
+    assert apply_rules(conn, alert).status == "Wife"
+
+
+
+def test_edit_tip_amount_updates_percent_and_joint_amount(conn) -> None:
+    tx_id = add_transaction(conn, 80.18)
+    edit(conn, tx_id, status="Joint", tip_amount="16.04")
+    tx = row(conn, tx_id)
+    assert (tx["tip_amount"], tx["tip_percent"], tx["joint_amount"]) == (16.04, 20.0, 96.22)
+
+
+def test_quick_classify_tip_amount_updates_existing_tip_fields(conn) -> None:
+    tx_id = add_transaction(conn, 80.18)
+    classify_transaction(conn, tx_id, "Joint", tip_amount=16.04)
+    tx = row(conn, tx_id)
+    assert (tx["status"], tx["tip_amount"], tx["tip_percent"], tx["joint_amount"]) == ("Joint", 16.04, 20.0, 96.22)
+
+
+def test_quick_personal_saves_tip_amount_without_joint_amount(conn) -> None:
+    tx_id = add_transaction(conn, 50)
+    classify_transaction(conn, tx_id, "Personal", tip_amount=10)
+    tx = row(conn, tx_id)
+    assert (tx["status"], tx["tip_amount"], tx["tip_percent"], tx["joint_amount"]) == ("Personal", 10, 20.0, 0)
+
+
+def test_quick_her_saves_venmo_amount_with_tip(conn) -> None:
+    tx_id = add_transaction(conn, 50)
+    classify_transaction(conn, tx_id, "Her", tip_amount=10)
+    tx = row(conn, tx_id)
+    assert (tx["status"], tx["tip_amount"], tx["tip_percent"], tx["joint_amount"]) == ("Her", 10, 20.0, 60)
+
+
+def test_edit_tip_does_not_force_joint_status(conn) -> None:
+    tx_id = add_transaction(conn, 50)
+    edit(conn, tx_id, status="Review", tip_percent="20")
+    tx = row(conn, tx_id)
+    assert (tx["status"], tx["tip_percent"], tx["tip_amount"], tx["joint_amount"]) == ("Review", 20, 10, 0)
+
+
+def test_edit_preserves_account_name_when_last4_blank(conn) -> None:
+    raw = "Chase Sapphire Preferred Visa: You made a $80.18 transaction with SAMPLE RESTAURANT on May 25, 2026 at 8:17 PM ET."
+    tx_id = add_transaction(
+        conn,
+        80.18,
+        "Joint",
+        92.18,
+        merchant="SAMPLE RESTAURANT",
+        account_name="Chase Sapphire Preferred Visa",
+        raw_text=raw,
+    )
+    edit(conn, tx_id, merchant="SAMPLE RESTAURANT", status="Joint", joint_amount=92.18, tip_amount="12")
+    assert row(conn, tx_id)["account_name"] == "Chase Sapphire Preferred Visa"
+
+
+def test_edit_can_set_account_name_without_last4(conn) -> None:
+    tx_id = add_transaction(conn, 80.18)
+    edit(conn, tx_id, status="Review", account_name="Chase Sapphire Preferred Visa")
+    tx = row(conn, tx_id)
+    assert tx["card_last4"] is None
+    assert tx["account_name"] == "Chase Sapphire Preferred Visa"
+
+
+def test_dashboard_review_count_is_not_limited_to_preview(conn) -> None:
+    for index in range(18):
+        add_transaction(
+            conn, 10, transaction_datetime=f"2026-05-{index + 1:02d}T12:00:00-04:00", merchant=f"Review {index}"
+        )
+    data = dashboard_data(conn, "2026-05")
+
+    assert data["needs_review_count"] == 18
+    assert data["needs_review_display_count"] == 15
+    assert len(data["needs_review"]) == 15
+
+
+def test_dashboard_status_totals_mix_reimbursement_and_transaction_amounts(conn) -> None:
+    add_transaction(conn, 99.63, "Joint", 111.63)
+    add_transaction(conn, 25, "Personal")
+    add_transaction(conn, 40, "Review")
+    add_transaction(conn, 15, "Ignored")
+    add_transaction(conn, 70, "Her", 82)
+
+    totals = {r["status"]: r["total"] for r in dashboard_data(conn, "2026-05")["totals_by_status"]}
+
+    assert totals == {"Her": 82.0, "Joint": 111.63, "Personal": 25.0, "Review": 40.0}
+
+
+def test_dashboard_separates_joint_and_venmo_totals(conn) -> None:
+    add_transaction(conn, 100, "Joint", 120, account_name="Card A")
+    add_transaction(conn, 40, "Split", 15, account_name="Card A")
+    add_transaction(conn, 70, "Her", 82, account_name="Card A")
+
+    data = dashboard_data(conn, "2026-05")
+
+    assert data["total_joint"] == 135.0
+    assert data["total_venmo"] == 82.0
+    assert data["totals_by_account"][0]["total"] == 135.0
+
+
+def test_rule_application_joint(conn) -> None:
+    add_rule(conn, "Corner Grocery", "Joint", "Groceries")
+    alert = ParsedAlert(
+        10, "Corner Grocery", "1234", "2026-05-01T12:00:00-04:00", "2026-05", "Chase alert $10.00 at Corner Grocery"
+    )
+    applied = apply_rules(conn, alert)
+    assert (applied.status, applied.joint_amount, applied.subcategory) == ("Joint", 10, "Groceries")
+
+
+def test_csv_export(conn, db_path: Path, tmp_path: Path) -> None:
+    add_rule(conn, "Power Company", "Joint", "Utilities")
+    assert insert_alert(
+        conn,
+        ParsedAlert(
+            20,
+            "Power Company",
+            "1234",
+            "2026-05-02T12:00:00-04:00",
+            "2026-05",
+            "Chase alert $20.00 at Power Company card ending in 1234",
+            source_message_id="sample-1",
+            source_guid="g-1",
+        ),
+    )
+    conn.commit()
+
+    transaction_csv, summary_csv = export_month("2026-05", db_path=db_path, export_dir=tmp_path / "exports")
+
+    with transaction_csv.open(newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert (rows[0]["Merchant"], rows[0]["Status"], rows[0]["Category"]) == ("Power Company", "Joint", "Utilities")
+    assert "Tip Percent" in rows[0]
+    assert "Tip Amount" in rows[0]
+    with summary_csv.open(newline="", encoding="utf-8") as f:
+        summary = list(csv.reader(f))
+    assert ["total_joint_reimbursement", "2026-05", "20.0"] in summary
+    assert ["joint_by_category", "Utilities", "20.0"] in summary

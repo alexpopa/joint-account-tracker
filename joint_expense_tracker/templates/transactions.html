@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="page-head">
-  <div><h1>Transactions</h1><p>Review, classify, split, and annotate imported alerts. Edit a Personal transaction to choose or create a subcategory.</p></div>
+  <div><h1>Transactions</h1><p>Review, classify, split, and annotate imported alerts. Pick a category for Joint, Split, and Personal spending.</p></div>
 </section>
 <details class="add-transaction">
   <summary class="add-trigger">+ Add transaction</summary>
@@ -20,20 +20,20 @@
       </select>
     </label>
     <label>Status
-      <select name="status">{% for status in statuses %}<option value="{{ status }}" {% if status == "Review" %}selected{% endif %}>{{ "Present" if status == "Wife" else ("Venmo" if status == "Her" else status) }}</option>{% endfor %}</select>
+      <select name="status">{% for status in statuses %}<option value="{{ status }}" {% if status == "Review" %}selected{% endif %}>{{ status|status_label }}</option>{% endfor %}</select>
     </label>
-    {% include "subcategory_input.html" %}
+    {% include "category_input.html" %}
     <label>Joint amount <span class="label-hint">For Split only</span><input name="joint_amount" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Optional"></label>
     <label class="form-wide">Note <input name="note" placeholder="Optional note"></label>
     <div class="actions form-wide"><button type="submit">Save transaction</button><span class="form-hint">You can edit the transaction later.</span></div>
   </form>
 </details>
 <form class="filters" method="get" action="/transactions">
-  <select name="month"><option value="">All months</option>{% for month in months %}<option value="{{ month }}" {% if filters.month == month %}selected{% endif %}>{{ month }}</option>{% endfor %}</select>
-  <select name="status"><option value="">Visible statuses</option>{% for status in statuses %}<option value="{{ status }}" {% if filters.status == status %}selected{% endif %}>{{ "Present" if status == "Wife" else ("Venmo" if status == "Her" else status) }}</option>{% endfor %}</select>
-  <select name="account"><option value="">All accounts</option>{% for acct in accounts %}<option value="{{ acct.card_last4 }}" {% if filters.account == acct.card_last4 %}selected{% endif %}>{{ acct.account_name }}</option>{% endfor %}</select>
-  <select name="subcategory" aria-label="Filter personal subcategory"><option value="">All personal subcategories</option>{% for category in subcategories %}<option value="{{ category }}" {% if filters.subcategory == category %}selected{% endif %}>{{ category }}</option>{% endfor %}</select>
-  <input name="q" value="{{ filters.q }}" placeholder="Search merchant/raw text">
+  <select name="month" aria-label="Month"><option value="">All months</option>{% for month in months %}<option value="{{ month }}" {% if filters.month == month %}selected{% endif %}>{{ month }}</option>{% endfor %}</select>
+  <select name="status" aria-label="Status"><option value="">All but Ignored</option>{% for status in statuses %}<option value="{{ status }}" {% if filters.status == status %}selected{% endif %}>{{ status|status_label }}</option>{% endfor %}</select>
+  <select name="account" aria-label="Account"><option value="">All accounts</option>{% for acct in accounts %}<option value="{{ acct.card_last4 }}" {% if filters.account == acct.card_last4 %}selected{% endif %}>{{ acct.account_name }}</option>{% endfor %}</select>
+  <select name="category" aria-label="Category"><option value="">All categories</option>{% for name in categories %}<option value="{{ name }}" {% if filters.category == name %}selected{% endif %}>{{ name }}</option>{% endfor %}</select>
+  <input name="q" value="{{ filters.q }}" placeholder="Search merchant/raw text" aria-label="Search">
   <button>Filter</button>
 </form>
 <div class="table-wrap">
@@ -44,42 +44,28 @@
       <tr>
         <td>{{ tx.transaction_datetime[:10] }}</td>
         <td>{{ tx.merchant }}</td>
-        <td class="money">${{ "%.2f"|format(tx.amount) }}</td>
+        <td class="money">{{ tx.amount|money }}</td>
         <td class="money">
           {% if tx.tip_amount %}
-          ${{ "%.2f"|format(tx.tip_amount) }}{% if tx.tip_percent %} ({{ "%.1f"|format(tx.tip_percent) }}%){% endif %}
+          {{ tx.tip_amount|money }}{% if tx.tip_percent %} ({{ "%.1f"|format(tx.tip_percent) }}%){% endif %}
           {% else %}
           -
           {% endif %}
         </td>
         <td>{{ tx.account_name or tx.card_last4 or "Unknown" }}</td>
-        <td><span class="pill">{{ "Present" if tx.status == "Wife" else ("Venmo" if tx.status == "Her" else tx.status) }}</span>{% if tx.status == "Personal" and tx.subcategory %}<div class="subcategory-label">{{ tx.subcategory }}</div>{% endif %}</td>
-        <td class="money">${{ "%.2f"|format(tx.joint_amount) }}</td>
+        <td><span class="pill">{{ tx.status|status_label }}</span>{% if tx.subcategory %}<div class="category-label">{{ tx.subcategory }}</div>{% endif %}</td>
+        <td class="money">{{ tx.joint_amount|money }}</td>
         <td>{{ tx.note or "" }}</td>
-        <td class="row-actions">
-          <form method="post" action="/transactions/{{ tx.id }}/classify" class="tip-form">
-            <input type="hidden" name="return_to" value="/transactions?month={{ filters.month }}&status={{ filters.status }}&account={{ filters.account }}&q={{ filters.q|urlencode }}&subcategory={{ filters.subcategory|urlencode }}">
-            <input name="tip_amount" type="number" min="0" step="0.01" placeholder="Tip $">
-            <button name="status" value="Joint">Joint</button>
-            <button name="status" value="Personal">Personal</button>
-            <button name="status" value="Wife">Present</button>
-            <button name="status" value="Her">Venmo</button>
-          </form>
-          {% for status in ["Review", "Ignored"] %}
-          <form method="post" action="/transactions/{{ tx.id }}/classify">
-            <input type="hidden" name="status" value="{{ status }}">
-            <input type="hidden" name="return_to" value="/transactions?month={{ filters.month }}&status={{ filters.status }}&account={{ filters.account }}&q={{ filters.q|urlencode }}&subcategory={{ filters.subcategory|urlencode }}">
-            <button>{{ status }}</button>
-          </form>
-          {% endfor %}
+        <td><div class="row-actions">
+          {% with category_value=tx.subcategory or "" %}{% include "quick_classify.html" %}{% endwith %}
           <form method="post" action="/transactions/{{ tx.id }}/classify" class="split-form">
             <input type="hidden" name="status" value="Split">
-            <input type="hidden" name="return_to" value="/transactions?month={{ filters.month }}&status={{ filters.status }}&account={{ filters.account }}&q={{ filters.q|urlencode }}&subcategory={{ filters.subcategory|urlencode }}">
-            <input name="joint_amount" type="number" min="0" step="0.01" placeholder="Split $">
+            <input type="hidden" name="return_to" value="{{ return_to }}">
+            <input name="joint_amount" type="number" min="0" step="0.01" placeholder="Split $" aria-label="Joint portion">
             <button>Split</button>
           </form>
           <a href="/transactions/{{ tx.id }}/edit">Edit</a>
-        </td>
+        </div></td>
       </tr>
       {% else %}
       <tr><td colspan="9">No transactions match these filters.</td></tr>
@@ -87,5 +73,5 @@
     </tbody>
   </table>
 </div>
-{% include "subcategory_script.html" %}
+{% include "category_script.html" %}
 {% endblock %}

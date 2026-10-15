@@ -1,0 +1,18 @@
+{# Row buttons for classifying a transaction in one click. Needs tx, return_to, categories.
+   The category picker applies to Joint and Personal; Present and Venmo ignore it. #}
+<form method="post" action="/transactions/{{ tx.id }}/classify" class="tip-form">
+  <input type="hidden" name="return_to" value="{{ return_to }}">
+  <input name="tip_amount" type="number" min="0" step="0.01" placeholder="Tip $" aria-label="Tip amount">
+  {% with compact=True %}{% include "category_input.html" %}{% endwith %}
+  <button name="status" value="Joint">Joint</button>
+  <button name="status" value="Personal">Personal</button>
+  <button name="status" value="Wife">{{ "Wife"|status_label }}</button>
+  <button name="status" value="Her">{{ "Her"|status_label }}</button>
+</form>
+{% for status in ["Review", "Ignored"] %}
+<form method="post" action="/transactions/{{ tx.id }}/classify">
+  <input type="hidden" name="status" value="{{ status }}">
+  <input type="hidden" name="return_to" value="{{ return_to }}">
+  <button class="secondary">{{ status|status_label }}</button>
+</form>
+{% endfor %}

@@ -1,0 +1,29 @@
+<script>
+  // Show the category picker only for statuses that carry a category, and swap in a
+  // text box when "+ New category…" is chosen.
+  const categorizedStatuses = {{ categorized_statuses|tojson }};
+  document.querySelectorAll('[data-category-field]').forEach((container) => {
+    const form = container.closest('form');
+    const status = form.querySelector('select[name="status"], select[name="default_status"]');
+    const select = container.querySelector('[data-category-select]');
+    const newLabel = container.querySelector('[data-new-category-label]');
+    const newInput = container.querySelector('[data-new-category-input]');
+    const update = () => {
+      const applies = !status || categorizedStatuses.includes(status.value);
+      const adding = select.selectedOptions[0].hasAttribute('data-new-category');
+      container.hidden = !applies;
+      select.disabled = !applies;
+      select.name = adding ? '' : 'category';
+      newLabel.hidden = !adding;
+      newInput.name = adding ? 'category' : '';
+      newInput.disabled = !applies || !adding;
+      newInput.required = applies && adding;
+    };
+    if (status) status.addEventListener('change', update);
+    select.addEventListener('change', () => {
+      update();
+      if (!newInput.disabled) newInput.focus();
+    });
+    update();
+  });
+</script>

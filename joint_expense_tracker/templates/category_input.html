@@ -1,0 +1,14 @@
+{# Category picker. Shown only while the form's status is Joint, Split, or Personal.
+   Optional: category_value (current value), compact (no visible label, for table rows). #}
+<div class="category-field{% if compact %} compact{% endif %}" data-category-field>
+  <label>{% if not compact %}Category{% endif %}
+    <select name="category" data-category-select{% if compact %} aria-label="Category"{% endif %}>
+      <option value="">{{ "Category…" if compact else "No category" }}</option>
+      {% for name in categories %}<option value="{{ name }}" {% if name == category_value|default('') %}selected{% endif %}>{{ name }}</option>{% endfor %}
+      <option value="" data-new-category>+ New category…</option>
+    </select>
+  </label>
+  <label data-new-category-label hidden>{% if not compact %}New category name{% endif %}
+    <input data-new-category-input maxlength="80" placeholder="e.g. Books" aria-label="New category name" disabled>
+  </label>
+</div>
