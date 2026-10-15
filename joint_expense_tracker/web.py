@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .config import DATA_DIR, DEFAULT_CHASE_KEYWORDS, DEFAULT_CHASE_SENDERS, STATUSES
-from .db import get_db, init_db, rows_to_dicts, set_setting, utc_now
+from .db import get_db, init_db, rows_to_dicts, set_setting, utc_now, personal_subcategories, save_subcategory
 from .importer import diagnose_messages, import_messages
 from .services import classify_transaction, create_manual_transaction, dashboard_data, export_month, update_transaction
 
@@ -74,6 +74,7 @@ def transactions(
     status: Optional[str] = None,
     account: Optional[str] = None,
     q: Optional[str] = None,
+    subcategory: Optional[str] = None,
 ):
     clauses = []
     params: list[str] = []
@@ -88,6 +89,9 @@ def transactions(
     if account:
         clauses.append("(card_last4 = ? OR account_name = ?)")
         params.extend([account, account])
+    if subcategory:
+        clauses.append("subcategory = ? COLLATE NOCASE")
+        params.append(subcategory)
     if q:
         clauses.append("(merchant LIKE ? OR raw_text LIKE ?)")
         params.extend([f"%{q}%", f"%{q}%"])
@@ -99,6 +103,7 @@ def transactions(
                 params,
             ).fetchall()
         )
+        categories = personal_subcategories(conn)
         all_months = rows_to_dicts(conn.execute("SELECT DISTINCT month FROM transactions ORDER BY month DESC").fetchall())
         accounts = rows_to_dicts(conn.execute("SELECT * FROM accounts WHERE active = 1 ORDER BY account_name").fetchall())
     return templates.TemplateResponse(
@@ -109,8 +114,9 @@ def transactions(
             "months": [row["month"] for row in all_months],
             "accounts": accounts,
             "statuses": STATUSES,
+            "subcategories": categories,
             "today": date.today().isoformat(),
-            "filters": {"month": month or "", "status": status or "", "account": account or "", "q": q or ""},
+            "filters": {"month": month or "", "status": status or "", "account": account or "", "q": q or "", "subcategory": subcategory or ""},
         },
     )
 
@@ -124,6 +130,7 @@ def create_transaction(
     status: str = Form("Review"),
     joint_amount: str = Form(""),
     note: str = Form(""),
+    subcategory: str = Form(""),
 ):
     try:
         date.fromisoformat(transaction_date)
@@ -144,6 +151,7 @@ def create_transaction(
             status,
             optional_float(joint_amount, "joint_amount"),
             note,
+            subcategory,
         )
     return redirect("/transactions")
 
@@ -171,9 +179,12 @@ def classify(
 def edit_transaction(request: Request, transaction_id: int):
     with get_db() as conn:
         row = conn.execute("SELECT * FROM transactions WHERE id = ?", (transaction_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Transaction not found")
+        categories = personal_subcategories(conn)
     return templates.TemplateResponse(
         "transaction_edit.html",
-        {"request": request, "transaction": dict(row), "statuses": STATUSES},
+        {"request": request, "transaction": dict(row), "statuses": STATUSES, "subcategories": categories},
     )
 
 
@@ -188,6 +199,7 @@ def save_transaction(
     tip_percent: str = Form(""),
     tip_amount: str = Form(""),
     note: str = Form(""),
+    subcategory: str = Form(""),
 ):
     with get_db() as conn:
         update_transaction(
@@ -202,6 +214,7 @@ def save_transaction(
                 "tip_percent": tip_percent,
                 "tip_amount": tip_amount,
                 "note": note,
+                "subcategory": subcategory,
             },
         )
     return redirect("/transactions")
@@ -235,7 +248,8 @@ def save_account(card_last4: str = Form(...), account_name: str = Form(...), act
 def rules(request: Request):
     with get_db() as conn:
         rows = rows_to_dicts(conn.execute("SELECT * FROM rules ORDER BY active DESC, priority ASC, id ASC").fetchall())
-    return templates.TemplateResponse("rules.html", {"request": request, "rules": rows, "statuses": STATUSES})
+        categories = personal_subcategories(conn)
+    return templates.TemplateResponse("rules.html", {"request": request, "rules": rows, "statuses": STATUSES, "subcategories": categories})
 
 
 @app.post("/rules")
@@ -243,6 +257,7 @@ def save_rule(
     match_text: str = Form(...),
     match_field: str = Form("merchant_or_raw"),
     default_status: str = Form(...),
+    default_subcategory: str = Form(""),
     default_joint_percent: str = Form(""),
     default_joint_amount: str = Form(""),
     priority: int = Form(100),
@@ -253,9 +268,9 @@ def save_rule(
             """
             INSERT INTO rules (
                 match_text, match_field, default_status, default_joint_percent,
-                default_joint_amount, priority, active
+                default_joint_amount, priority, active, default_subcategory
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 match_text.strip(),
@@ -265,6 +280,7 @@ def save_rule(
                 float(default_joint_amount) if default_joint_amount else None,
                 priority,
                 active,
+                save_subcategory(conn, default_status, default_subcategory),
             ),
         )
     return redirect("/rules")
@@ -312,3 +328,14 @@ def save_settings(
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     return {"ok": "true", "time": utc_now()}
+
+
+@app.post("/rules/{rule_id}/subcategory")
+def set_rule_subcategory(rule_id: int, default_subcategory: str = Form("")):
+    with get_db() as conn:
+        rule = conn.execute("SELECT default_status FROM rules WHERE id = ?", (rule_id,)).fetchone()
+        if not rule:
+            raise HTTPException(status_code=404, detail="Rule not found")
+        category = save_subcategory(conn, rule["default_status"], default_subcategory)
+        conn.execute("UPDATE rules SET default_subcategory = ? WHERE id = ?", (category, rule_id))
+    return redirect("/rules")

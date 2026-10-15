@@ -198,3 +198,18 @@ tr:last-child td { border-bottom: 0; }
   .manual-form { grid-template-columns: 1fr; }
   .manual-form .form-wide { grid-column: auto; }
 }
+
+[data-personal-subcategory][hidden] { display: none; }
+.subcategory-label { margin-top: 5px; color: var(--muted, #667085); font-size: 0.85rem; }
+.subcategory-rule-form { display: flex; gap: 6px; align-items: center; }
+.subcategory-rule-form input { min-width: 150px; }
+
+.rule-create { margin-bottom: 20px; }
+[data-personal-subcategory] input { min-width: 0; width: 100%; }
+
+.rule-create label { align-content: start; }
+
+[data-personal-subcategory] { display: grid; gap: 8px; align-content: start; }
+[data-personal-subcategory] label { display: grid; gap: 6px; }
+[data-new-category-label][hidden] { display: none; }
+[data-personal-subcategory] select { width: 100%; min-width: 170px; }

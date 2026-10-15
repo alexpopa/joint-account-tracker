@@ -1,0 +1,26 @@
+<script>
+  document.querySelectorAll('[data-personal-subcategory]').forEach((container) => {
+    const status = container.closest('form').querySelector('select[name="status"], select[name="default_status"]');
+    const select = container.querySelector('[data-category-select]');
+    const fieldName = select.name;
+    const newLabel = container.querySelector('[data-new-category-label]');
+    const newInput = container.querySelector('[data-new-category-input]');
+    const update = () => {
+      const personal = !status || status.value === 'Personal';
+      const adding = select.selectedOptions[0].hasAttribute('data-new-category');
+      container.hidden = !personal;
+      select.disabled = !personal;
+      select.name = adding ? '' : fieldName;
+      newLabel.hidden = !adding;
+      newInput.name = adding ? fieldName : '';
+      newInput.disabled = !personal || !adding;
+      newInput.required = personal && adding;
+    };
+    if (status) status.addEventListener('change', update);
+    select.addEventListener('change', () => {
+      update();
+      if (!newInput.disabled) newInput.focus();
+    });
+    update();
+  });
+</script>

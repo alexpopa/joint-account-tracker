@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import DB_PATH, EXPORT_DIR, STATUSES, ensure_data_dirs
-from .db import get_db, rows_to_dicts, utc_now
+from .db import get_db, rows_to_dicts, utc_now, save_subcategory
 from .models import ParsedAlert
 from .parser import extract_account_name
 from .rules import apply_rules, joint_amount_for_status, normalize_status, tip_amount_from_percent, tip_percent_from_amount
@@ -32,9 +32,9 @@ def insert_alert(conn: sqlite3.Connection, alert: ParsedAlert) -> bool:
             INSERT INTO transactions (
                 source_message_id, source_guid, source_sender, source_date_raw,
                 transaction_datetime, month, amount, merchant, card_last4,
-                account_name, status, joint_amount, raw_text, created_at, updated_at
+                account_name, status, joint_amount, raw_text, created_at, updated_at, subcategory
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 alert.source_message_id,
@@ -52,6 +52,7 @@ def insert_alert(conn: sqlite3.Connection, alert: ParsedAlert) -> bool:
                 alert.raw_text,
                 now,
                 now,
+                save_subcategory(conn, alert.status, alert.subcategory),
             ),
         )
         return True
@@ -68,6 +69,7 @@ def create_manual_transaction(
     status: str = "Review",
     joint_amount: float | None = None,
     note: str | None = None,
+    subcategory: str | None = None,
 ) -> int:
     """Create a transaction when there is no imported message to attach to it."""
     status = normalize_status(status)
@@ -79,9 +81,9 @@ def create_manual_transaction(
         """
         INSERT INTO transactions (
             transaction_datetime, month, amount, merchant, card_last4,
-            account_name, status, joint_amount, note, raw_text, created_at, updated_at
+            account_name, status, joint_amount, note, raw_text, created_at, updated_at, subcategory
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             f"{transaction_date}T12:00:00",
@@ -96,6 +98,7 @@ def create_manual_transaction(
             "Manually added transaction",
             now,
             now,
+            save_subcategory(conn, status, subcategory),
         ),
     )
     return int(cursor.lastrowid)
@@ -126,10 +129,11 @@ def classify_transaction(
         conn.execute(
             """
             UPDATE transactions
-            SET status = ?, joint_amount = ?, tip_percent = ?, tip_amount = ?, updated_at = ?
+            SET status = ?, joint_amount = ?, tip_percent = ?, tip_amount = ?, updated_at = ?,
+                subcategory = CASE WHEN ? = 'Personal' THEN subcategory ELSE NULL END
             WHERE id = ?
             """,
-            (status, round(computed, 2), tip_percent if status != "Ignored" else None, round(tip_amount, 2), utc_now(), transaction_id),
+            (status, round(computed, 2), tip_percent if status != "Ignored" else None, round(tip_amount, 2), utc_now(), status, transaction_id),
         )
 
 
@@ -147,7 +151,7 @@ def _tip_values_from_edit(amount: float, data: dict[str, Any], status: str) -> t
 
 def update_transaction(conn: sqlite3.Connection, transaction_id: int, data: dict[str, Any]) -> None:
     status = normalize_status(str(data.get("status", "Review")))
-    current = conn.execute("SELECT amount, account_name, raw_text FROM transactions WHERE id = ?", (transaction_id,)).fetchone()
+    current = conn.execute("SELECT amount, account_name, raw_text, subcategory FROM transactions WHERE id = ?", (transaction_id,)).fetchone()
     if not current:
         return
     amount = float(current["amount"])
@@ -162,7 +166,7 @@ def update_transaction(conn: sqlite3.Connection, transaction_id: int, data: dict
         UPDATE transactions
         SET merchant = ?, card_last4 = ?, account_name = ?, status = ?, joint_amount = ?,
             tip_percent = ?, tip_amount = ?,
-            note = ?, updated_at = ?
+            note = ?, updated_at = ?, subcategory = ?
         WHERE id = ?
         """,
         (
@@ -175,6 +179,7 @@ def update_transaction(conn: sqlite3.Connection, transaction_id: int, data: dict
             round(tip_amount, 2),
             data.get("note") or None,
             utc_now(),
+            save_subcategory(conn, status, data.get("subcategory", current["subcategory"])),
             transaction_id,
         ),
     )
@@ -277,7 +282,7 @@ def export_month(month: str, db_path: Path = DB_PATH, export_dir: Path = EXPORT_
             conn.execute(
                 """
                 SELECT transaction_datetime, month, merchant, amount, tip_percent, tip_amount,
-                       card_last4, account_name, status, joint_amount, note, raw_text
+                       card_last4, account_name, status, joint_amount, note, raw_text, subcategory
                 FROM transactions
                 WHERE month = ?
                 ORDER BY transaction_datetime ASC
@@ -287,7 +292,7 @@ def export_month(month: str, db_path: Path = DB_PATH, export_dir: Path = EXPORT_
         )
         with transaction_path.open("w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow(["Date", "Month", "Merchant", "Amount", "Tip Percent", "Tip Amount", "Card Last4", "Account Name", "Status", "Joint Amount", "Note", "Raw Text"])
+            writer.writerow(["Date", "Month", "Merchant", "Amount", "Tip Percent", "Tip Amount", "Card Last4", "Account Name", "Status", "Joint Amount", "Note", "Raw Text", "Subcategory"])
             for row in rows:
                 writer.writerow(
                     [
@@ -303,6 +308,7 @@ def export_month(month: str, db_path: Path = DB_PATH, export_dir: Path = EXPORT_
                         row["joint_amount"],
                         row["note"],
                         row["raw_text"],
+                        row["subcategory"],
                     ]
                 )
         data = dashboard_data(conn, month)

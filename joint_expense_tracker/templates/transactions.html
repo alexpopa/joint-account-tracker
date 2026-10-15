@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="page-head">
-  <div><h1>Transactions</h1><p>Review, classify, split, and annotate imported alerts.</p></div>
+  <div><h1>Transactions</h1><p>Review, classify, split, and annotate imported alerts. Edit a Personal transaction to choose or create a subcategory.</p></div>
 </section>
 <details class="add-transaction">
   <summary class="add-trigger">+ Add transaction</summary>
@@ -22,6 +22,7 @@
     <label>Status
       <select name="status">{% for status in statuses %}<option value="{{ status }}" {% if status == "Review" %}selected{% endif %}>{{ "Present" if status == "Wife" else status }}</option>{% endfor %}</select>
     </label>
+    {% include "subcategory_input.html" %}
     <label>Joint amount <span class="label-hint">For Split only</span><input name="joint_amount" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Optional"></label>
     <label class="form-wide">Note <input name="note" placeholder="Optional note"></label>
     <div class="actions form-wide"><button type="submit">Save transaction</button><span class="form-hint">You can edit the transaction later.</span></div>
@@ -31,6 +32,7 @@
   <select name="month"><option value="">All months</option>{% for month in months %}<option value="{{ month }}" {% if filters.month == month %}selected{% endif %}>{{ month }}</option>{% endfor %}</select>
   <select name="status"><option value="">Visible statuses</option>{% for status in statuses %}<option value="{{ status }}" {% if filters.status == status %}selected{% endif %}>{{ "Present" if status == "Wife" else status }}</option>{% endfor %}</select>
   <select name="account"><option value="">All accounts</option>{% for acct in accounts %}<option value="{{ acct.card_last4 }}" {% if filters.account == acct.card_last4 %}selected{% endif %}>{{ acct.account_name }}</option>{% endfor %}</select>
+  <select name="subcategory" aria-label="Filter personal subcategory"><option value="">All personal subcategories</option>{% for category in subcategories %}<option value="{{ category }}" {% if filters.subcategory == category %}selected{% endif %}>{{ category }}</option>{% endfor %}</select>
   <input name="q" value="{{ filters.q }}" placeholder="Search merchant/raw text">
   <button>Filter</button>
 </form>
@@ -51,12 +53,12 @@
           {% endif %}
         </td>
         <td>{{ tx.account_name or tx.card_last4 or "Unknown" }}</td>
-        <td><span class="pill">{{ "Present" if tx.status == "Wife" else tx.status }}</span></td>
+        <td><span class="pill">{{ "Present" if tx.status == "Wife" else tx.status }}</span>{% if tx.status == "Personal" and tx.subcategory %}<div class="subcategory-label">{{ tx.subcategory }}</div>{% endif %}</td>
         <td class="money">${{ "%.2f"|format(tx.joint_amount) }}</td>
         <td>{{ tx.note or "" }}</td>
         <td class="row-actions">
           <form method="post" action="/transactions/{{ tx.id }}/classify" class="tip-form">
-            <input type="hidden" name="return_to" value="/transactions?month={{ filters.month }}&status={{ filters.status }}&account={{ filters.account }}&q={{ filters.q }}">
+            <input type="hidden" name="return_to" value="/transactions?month={{ filters.month }}&status={{ filters.status }}&account={{ filters.account }}&q={{ filters.q|urlencode }}&subcategory={{ filters.subcategory|urlencode }}">
             <input name="tip_amount" type="number" min="0" step="0.01" placeholder="Tip $">
             <button name="status" value="Joint">Joint</button>
             <button name="status" value="Personal">Personal</button>
@@ -66,13 +68,13 @@
           {% for status in ["Review", "Ignored"] %}
           <form method="post" action="/transactions/{{ tx.id }}/classify">
             <input type="hidden" name="status" value="{{ status }}">
-            <input type="hidden" name="return_to" value="/transactions?month={{ filters.month }}&status={{ filters.status }}&account={{ filters.account }}&q={{ filters.q }}">
+            <input type="hidden" name="return_to" value="/transactions?month={{ filters.month }}&status={{ filters.status }}&account={{ filters.account }}&q={{ filters.q|urlencode }}&subcategory={{ filters.subcategory|urlencode }}">
             <button>{{ status }}</button>
           </form>
           {% endfor %}
           <form method="post" action="/transactions/{{ tx.id }}/classify" class="split-form">
             <input type="hidden" name="status" value="Split">
-            <input type="hidden" name="return_to" value="/transactions?month={{ filters.month }}&status={{ filters.status }}&account={{ filters.account }}&q={{ filters.q }}">
+            <input type="hidden" name="return_to" value="/transactions?month={{ filters.month }}&status={{ filters.status }}&account={{ filters.account }}&q={{ filters.q|urlencode }}&subcategory={{ filters.subcategory|urlencode }}">
             <input name="joint_amount" type="number" min="0" step="0.01" placeholder="Split $">
             <button>Split</button>
           </form>
@@ -85,4 +87,5 @@
     </tbody>
   </table>
 </div>
+{% include "subcategory_script.html" %}
 {% endblock %}

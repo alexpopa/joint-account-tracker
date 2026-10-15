@@ -55,6 +55,7 @@ def apply_rules(conn: sqlite3.Connection, alert: ParsedAlert) -> ParsedAlert:
         if match_text and match_text in haystack:
             status = normalize_status(str(row["default_status"]))
             alert.status = status
+            alert.subcategory = row["default_subcategory"] if status == "Personal" else None
             if status in {"Joint", "Her"}:
                 alert.joint_amount = alert.amount
             elif status == "Split":

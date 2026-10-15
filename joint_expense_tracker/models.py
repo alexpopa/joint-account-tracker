@@ -18,3 +18,4 @@ class ParsedAlert:
     account_name: str | None = None
     status: str = "Review"
     joint_amount: float = 0.0
+    subcategory: str | None = None

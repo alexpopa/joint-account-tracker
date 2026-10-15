@@ -109,6 +109,12 @@ def init_db(db_path: Path = DB_PATH) -> None:
     with get_db(db_path) as conn:
         conn.executescript(SCHEMA)
         _migrate_transactions(conn)
+        for table, column in [("transactions", "subcategory"), ("rules", "default_subcategory")]:
+            columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+            if column not in columns:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
+        conn.execute("CREATE TABLE IF NOT EXISTS personal_subcategories (name TEXT PRIMARY KEY COLLATE NOCASE)")
+        conn.executemany("INSERT OR IGNORE INTO personal_subcategories (name) VALUES (?)", [("Food",), ("Video games",)])
         defaults: dict[str, Any] = {
             "messages_db_path": str(DEFAULT_MESSAGES_DB),
             "chase_sender_filters": ",".join(DEFAULT_CHASE_SENDERS),
@@ -161,3 +167,15 @@ def set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
         """,
         (key, value),
     )
+
+
+def personal_subcategories(conn: sqlite3.Connection) -> list[str]:
+    return [row["name"] for row in conn.execute("SELECT name FROM personal_subcategories ORDER BY name COLLATE NOCASE")]
+
+
+def save_subcategory(conn: sqlite3.Connection, status: str, name: str | None) -> str | None:
+    if status != "Personal" or not name or not name.strip():
+        return None
+    name = " ".join(name.split())[:80]
+    conn.execute("INSERT OR IGNORE INTO personal_subcategories (name) VALUES (?)", (name,))
+    return conn.execute("SELECT name FROM personal_subcategories WHERE name = ?", (name,)).fetchone()["name"]
